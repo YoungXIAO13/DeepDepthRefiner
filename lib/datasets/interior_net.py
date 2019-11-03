@@ -10,12 +10,14 @@ import torch.utils.data as data
 
 
 class InteriorNet(data.Dataset):
-    def __init__(self, root_dir, preprocess=None, method_name='sharpnet_pred',
+    def __init__(self, root_dir, preprocess=None, 
+                 label_name='_raycastingV2', method_name='sharpnet_pred',
                  gt_dir='data', label_dir='label', pred_dir='pred',
                  depth_ext='-depth.png', label_ext='-order-pix.npy'):
         super(InteriorNet, self).__init__()
         self.root_dir = root_dir
         self.preprocess = preprocess
+        self.label_name = label_name
         self.method_name = method_name
         self.gt_dir = gt_dir
         self.label_dir = label_dir
@@ -41,8 +43,9 @@ class InteriorNet(data.Dataset):
 
     def _fetch_data(self, index):
         # fetch depth map and normalize the values
-        depth_gt_path = join(self.root_dir, self.gt_dir, self.df.iloc[index]['scene'],
-                             self.df.iloc[index]['image'] + self.depth_ext)
+        depth_gt_path = join(self.root_dir, self.gt_dir, 
+                             '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
+                             '{:4d}{}'.format(self.df.iloc[index]['image'], self.depth_ext))
         depth_gt = cv2.imread(depth_gt_path, -1) / 1000 / 50
 
         depth_pred_path = join(self.root_dir, self.pred_dir, self.df.iloc[index]['scene'],
@@ -50,8 +53,9 @@ class InteriorNet(data.Dataset):
         depth_pred = pickle.load(depth_pred_path) / 50
 
         # fetch occlusion orientation labels
-        label_path = join(self.root_dir, self.label_dir, self.df.iloc[index]['scene'],
-                          self.df.iloc[index]['image'] + self.label_ext)
+        label_path = join(self.root_dir, self.label_dir, 
+                          '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
+                          '{}{}'.format(self.df.iloc[index]['image'], self.label_ext))
         label = np.load(label_path)
 
         return depth_gt, depth_pred, label

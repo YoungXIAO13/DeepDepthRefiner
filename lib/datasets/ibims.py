@@ -33,13 +33,11 @@ class Ibims(data.Dataset):
         return depth_gt, depth_pred, label
 
     def _fetch_data(self, index):
-        # fetch depth map and normalize the values into [0, 1)
+        # fetch depth map in meters
         depth_gt_mat = join(self.root_dir, self.gt_dir, '{}.mat'.format(self.im_names[index]))
         depth_pred_mat = join(self.root_dir, self.method_name, '{}_predictions_{}_results.mat'.format(
             self.im_names[index], self.method_name))
         depth_gt, depth_pred = self._load_depths_from_mat(depth_gt_mat, depth_pred_mat)
-        depth_gt /= 50
-        depth_pred /= 50
 
         # fetch occlusion orientation labels
         label_path = join(self.root_dir, self.label_dir, self.im_names[index] + self.label_ext)

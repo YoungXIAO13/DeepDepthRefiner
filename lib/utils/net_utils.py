@@ -37,17 +37,61 @@ def kaiming_init(net):
 
 def save_checkpoint(state, filename):
     torch.save(state, filename)
+    print('save model at {}'.format(filename))
 
 
-def _smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights, bbox_outside_weights, sigma=1.0):
-    sigma_2 = sigma ** 2
-    box_diff = bbox_pred - bbox_targets
-    in_box_diff = bbox_inside_weights * box_diff
-    abs_in_box_diff = torch.abs(in_box_diff)
-    smoothL1_sign = (abs_in_box_diff < 1. / sigma_2).detach().float()
-    in_loss_box = torch.pow(in_box_diff, 2) * (sigma_2 / 2.) * smoothL1_sign + \
-                  (abs_in_box_diff - (0.5 / sigma_2)) * (1. - smoothL1_sign)
-    out_loss_box = bbox_outside_weights * in_loss_box
-    loss_box = out_loss_box
-    loss_box = loss_box.sum(1).mean()
-    return loss_box
+def load_checkpoint(model, optimizer, pth_file):
+    print("loading checkpoint from {}".format(pth_file))
+    checkpoint = torch.load(pth_file, map_location=lambda storage, loc: storage.cuda())
+    epoch = checkpoint['epoch']
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    pretrained_dict = checkpoint['model']
+    model_dict = model.state_dict()
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print('Previous weight loaded')
+    return epoch
+
+
+def log_smooth_l1_loss(pred, target):
+    log_pred = pred.log()
+    log_target = target.log()
+    loss = F.smooth_l1_loss(log_pred, log_target)
+    return loss
+
+
+def neighbor_depth_variation(depth):
+    """Compute the variation of depth values in the neighborhood-8 of each pixel"""
+    var1 = depth[..., 1:-1, 1:-1] - depth[..., :-2, :-2]
+    var2 = depth[..., 1:-1, 1:-1] - depth[..., :-2, 1:-1]
+    var3 = depth[..., 1:-1, 1:-1] - depth[..., :-2, 2:]
+    var4 = depth[..., 1:-1, 1:-1] - depth[..., 1:-1, :-2]
+    var6 = depth[..., 1:-1, 1:-1] - depth[..., 1:-1, 2:]
+    var7 = depth[..., 1:-1, 1:-1] - depth[..., 2:, :-2]
+    var8 = depth[..., 1:-1, 1:-1] - depth[..., 2:, 1:-1]
+    var9 = depth[..., 1:-1, 1:-1] - depth[..., 2:, 2:]
+    
+    return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
+
+
+def occlusion_aware_loss(depth_gt, depth_pred, occlusion, th=1.):
+    """
+    Compute a distance between depth maps using the occlusion orientation
+    :param depth_gt: (B, 1, H, W)
+    :param depth_pred: (B, 1, H, W)
+    :param occlusion: (B, 9, H, W)
+    """
+    # get neighborhood depth variation in (B, 8, H-2, W-2)
+    depth_var = neighbor_depth_variation(depth_pred)
+    orientation = occlusion[:, 1:, 1:-1, 1:-1]
+
+    fg_mask = (orientation == 1).float()
+    bg_mask = (orientation == -1).float()
+
+    fg_loss = (depth_var + th).relu() * fg_mask
+    bg_loss = (-depth_var + th).relu() * bg_mask
+    loss_avg = fg_loss.sum() / fg_mask.sum() + bg_loss.sum() / bg_mask.sum()
+
+    return loss_avg
+

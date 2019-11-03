@@ -45,17 +45,18 @@ class InteriorNet(data.Dataset):
         # fetch depth map and normalize the values
         depth_gt_path = join(self.root_dir, self.gt_dir, 
                              '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
-                             '{:4d}{}'.format(self.df.iloc[index]['image'], self.depth_ext))
+                             '{:04d}{}'.format(self.df.iloc[index]['image'], self.depth_ext))
         depth_gt = cv2.imread(depth_gt_path, -1) / 1000 / 50
 
         depth_pred_path = join(self.root_dir, self.pred_dir, self.df.iloc[index]['scene'],
                                self.method_name, 'data', '{}.pkl'.format(self.df.iloc[index]['image']))
-        depth_pred = pickle.load(depth_pred_path) / 50
+        with open(depth_pred_path, 'rb') as f:
+            depth_pred = pickle.load(f) / 50
 
         # fetch occlusion orientation labels
         label_path = join(self.root_dir, self.label_dir, 
                           '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
-                          '{}{}'.format(self.df.iloc[index]['image'], self.label_ext))
+                          '{:04d}{}'.format(self.df.iloc[index]['image'], self.label_ext))
         label = np.load(label_path)
 
         return depth_gt, depth_pred, label

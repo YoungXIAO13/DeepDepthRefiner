@@ -9,7 +9,7 @@ import torch.utils.data as data
 
 class Ibims(data.Dataset):
     def __init__(self, root_dir, method_name,
-                 gt_dir='data', label_dir='label', label_ext='-order-pix.npy'):
+                 gt_dir='gt_depth', label_dir='label', label_ext='-order-pix.npy'):
         super(Ibims, self).__init__()
         self.root_dir = root_dir
         self.gt_dir = gt_dir
@@ -78,3 +78,15 @@ if __name__ == "__main__":
     method_name = 'junli'
     dataset = Ibims(root_dir, method_name)
     print(len(dataset))
+
+    from torch.utils.data import DataLoader
+    import sys
+    import time
+    test_loader = DataLoader(dataset, batch_size=4, shuffle=False)
+    begin = time.time()
+    for i, data in enumerate(test_loader):
+        data = data
+        print(time.time() - begin)
+        if i == 0:
+            print(data[0].shape, data[1].shape, data[2].shape)
+            sys.exit()

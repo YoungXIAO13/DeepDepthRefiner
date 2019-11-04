@@ -10,7 +10,7 @@ from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
 
 from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
-    log_smooth_l1_loss, occlusion_aware_loss
+    log_smooth_l1_loss, occlusion_aware_loss, create_gamma_matrix
 from lib.utils.evaluate_ibims_error_metrics import compute_distance_related_errors, compute_global_errors
 
 # =================PARAMETERS=============================== #
@@ -62,6 +62,8 @@ if opt.resume:
     load_checkpoint(net, optimizer, opt.checkpoint)
 
 net.cuda()
+gamma = create_gamma_matrix(480, 640, 600, 600)
+gamma = torch.fromarray(gamma).cuda()
 # ========================================================== #
 
 
@@ -83,15 +85,15 @@ def train(data_loader, net, optimizer):
     end = time.time()
     for i, data in enumerate(data_loader):
         # load data and label
-        depth_gt, depth_coarse, occlusion = data
-        depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda()
+        depth_gt, depth_coarse, occlusion, normal = data
+        depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
         # forward pass
         depth_pred = net(occlusion, depth_coarse)
 
         # compute losses and update the meters
         loss_depth_all = log_smooth_l1_loss(depth_pred, depth_gt)
-        loss_depth_occ = occlusion_aware_loss(depth_gt, depth_pred, occlusion, 15. / 1000)
+        loss_depth_occ = occlusion_aware_loss(depth_gt, depth_pred, occlusion, normal, gamma, 15. / 1000)
         loss = loss_depth_all + opt.alpha * loss_depth_occ
         optimizer.zero_grad()
         loss.backward()

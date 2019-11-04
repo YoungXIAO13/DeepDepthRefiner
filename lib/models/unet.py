@@ -54,7 +54,7 @@ class UNet(nn.Module):
 
         self.output_layer = ConvBnRelu(10, 1, 3, 1, 1, 1, 1,\
                                      has_bn=False, \
-                                     has_relu=False, inplace=True, has_bias=True)
+                                     has_relu=True, inplace=True, has_bias=True)
 
     def forward(self, occ, x):
         #### Occlusion ####

@@ -55,8 +55,9 @@ def load_checkpoint(model, optimizer, pth_file):
 
 
 def log_smooth_l1_loss(pred, target):
-    log_pred = pred.log()
-    log_target = target.log()
+    valid_mask = (pred != 0) * (target != 0)
+    log_pred = pred[valid_mask]
+    log_target = target[valid_mask]
     loss = F.smooth_l1_loss(log_pred, log_target)
     return loss
 

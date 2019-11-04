@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
+from .basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
 
 
 class UNet(nn.Module):

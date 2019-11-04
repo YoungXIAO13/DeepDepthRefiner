@@ -6,9 +6,10 @@ import torch.optim as optim
 import os, sys
 import time
 
-sys.path.append('./lib/')UNet
+#sys.path.append('./lib/')
+from lib.models.unet import UNet
 from lib.datasets.ibims import Ibims
-from lib.datasets.interiro_net import InteriorNet
+from lib.datasets.interior_net import InteriorNet
 
 from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
     log_smooth_l1_loss, occlusion_aware_loss
@@ -21,10 +22,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--alpha', type=float, default=1., help='weight balance')
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 parser.add_argument('--step', type=int, default=50, help='epoch to decrease')
-parser.add_argument('--batch_size', type=int, default=16, help='input batch size')
+parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
 parser.add_argument('--n_epoch', type=int, default=100, help='number of epochs to train for')
-parser.add_argument('--print_freq', type=int, default=100, help='frequence of output print')
+parser.add_argument('--print_freq', type=int, default=50, help='frequence of output print')
 
 # pth settings
 parser.add_argument('--session', type=int, default=0, help='training session')
@@ -85,7 +86,7 @@ def train(data_loader, net, optimizer):
     for i, data in enumerate(data_loader):
         # load data and label
         depth_gt, depth_coarse, occlusion = data
-        depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_pred.cuda(), occlusion.cuda()
+        depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda()
 
         # forward pass
         depth_pred = net(occlusion, depth_coarse)
@@ -102,9 +103,9 @@ def train(data_loader, net, optimizer):
         batch_time = time.time() - end
         end = time.time()
 
-        if (i + 1) % opt.print_freq == 0:
-            print("\tEpoch %3d --- Iter [%d/%d] Train loss: %.2f || Batch time: %.2f" %
-                  (epoch, i + 1, len(data_loader), loss.item(), batch_time))
+        if i % opt.print_freq == 0:
+            print("\tEpoch {} --- Iter [{}/{}] Train loss: {} + {} || Batch time: {}".format(
+                  epoch, i + 1, len(data_loader), loss_depth_all.item(), loss_depth_occ.item(), batch_time))
 # ========================================================== #
 
 
@@ -119,18 +120,21 @@ def val(data_loader, net, optimizer):
     thr2    = np.zeros(num_samples, np.float32)
     thr3    = np.zeros(num_samples, np.float32)
 
-    net.val()
+    net.eval()
     for i, data in enumerate(data_loader):
         # load data and label
         depth_gt, depth_coarse, occlusion = data
-        depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_pred.cuda(), occlusion.cuda()
+        depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda()
 
         # forward pass
         depth_pred = net(occlusion, depth_coarse)
 
+        # mask out invalid depth prediction
+        depth_pred = depth_pred * (depth_gt != 0).float()
+
         # get numpy array from torch tensor
-        gt = depth_gt.unsqueeze().cpu().numpy()
-        pred = depth_pred.unsqueeze().cpu().numpy()
+        gt = depth_gt.squeeze().detach().cpu().numpy()
+        pred = depth_pred.squeeze().detach().cpu().numpy()
 
         gt_vec = gt.flatten()
         pred_vec = pred.flatten()

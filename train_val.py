@@ -1,12 +1,10 @@
 import argparse
 import numpy as np
-import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
-import os, sys
+import os
 import time
 
-#sys.path.append('./lib/')
 from lib.models.unet import UNet
 from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
@@ -73,7 +71,7 @@ if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')
 with open(logname, 'a') as f:
-    f.write(str(opt) + '\n' + '\n')
+    f.write(str(opt) + '\n')
     f.write('training set: ' + str(len(dataset_train)) + '\n')
     f.write('validation set: ' + str(len(dataset_val)) + '\n')
 # ========================================================== #
@@ -109,6 +107,7 @@ def train(data_loader, net, optimizer):
 # ========================================================== #
 
 
+# ===================== DEFINE VAL ========================= #
 def val(data_loader, net, optimizer):
     # Initialize global and geometric errors ...
     num_samples = len(data_loader)
@@ -129,12 +128,14 @@ def val(data_loader, net, optimizer):
         # forward pass
         depth_pred = net(occlusion, depth_coarse)
 
-        # mask out invalid depth prediction
-        depth_pred = depth_pred * (depth_gt != 0).float()
+        # mask out invalid depth values
+        valid_mask = ((depth_gt != 0) * (depth_pred != 0)).float()
+        gt_valid = depth_gt * valid_mask
+        pred_valid = depth_pred * valid_mask
 
         # get numpy array from torch tensor
-        gt = depth_gt.squeeze().detach().cpu().numpy()
-        pred = depth_pred.squeeze().detach().cpu().numpy()
+        gt = gt_valid.squeeze().detach().cpu().numpy()
+        pred = pred_valid.squeeze().detach().cpu().numpy()
 
         gt_vec = gt.flatten()
         pred_vec = pred.flatten()
@@ -142,7 +143,7 @@ def val(data_loader, net, optimizer):
         abs_rel[i], sq_rel[i], rms[i], log10[i], thr1[i], thr2[i], thr3[i] = compute_global_errors(gt_vec,pred_vec)
     
     return abs_rel, sq_rel, rms, log10, thr1, thr2, thr3
-
+# ========================================================== #
 
 
 # =============BEGIN OF THE LEARNING LOOP=================== #
@@ -171,19 +172,20 @@ for epoch in range(opt.n_epoch):
     # log testing reults
     with open(logname, 'a') as f:
         f.write('Results for {} epoch:\n'.format(epoch))
-        f.write('rel    =  {}'.format(np.nanmean(abs_rel)))
-        f.write('sq_rel =  {}'.format(np.nanmean(sq_rel)))
-        f.write('log10  =  {}'.format(np.nanmean(log10)))
-        f.write('rms    =  {}'.format(np.nanmean(rms)))
-        f.write('thr1   =  {}'.format(np.nanmean(thr1)))
-        f.write('thr2   =  {}'.format(np.nanmean(thr2)))
-        f.write('thr3   =  {}'.format(np.nanmean(thr3)))
+        f.write('rel    =  {}\n'.format(np.nanmean(abs_rel)))
+        f.write('sq_rel =  {}\n'.format(np.nanmean(sq_rel)))
+        f.write('log10  =  {}\n'.format(np.nanmean(log10)))
+        f.write('rms    =  {}\n'.format(np.nanmean(rms)))
+        f.write('thr1   =  {}\n'.format(np.nanmean(thr1)))
+        f.write('thr2   =  {}\n'.format(np.nanmean(thr2)))
+        f.write('thr3   =  {}\n\n'.format(np.nanmean(thr3)))
 
     # update best_rms and save checkpoint
     is_best = np.nanmean(rms) < best_rms
     best_rms = min(np.nanmean(rms), best_rms)
-    save_checkpoint({
-        'epoch': epoch,
-        'model': net.state_dict(),
-        'optimizer': optimizer.state_dict()
-    }, os.path.join(result_path, 'checkpoint_{}_{:4f}.pth'.format(epoch, best_rms)))
+    if is_best:
+        save_checkpoint({
+            'epoch': epoch,
+            'model': net.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }, os.path.join(result_path, 'checkpoint_{}_{}_{:.2f}.pth'.format(opt.session, epoch, best_rms)))

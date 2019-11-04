@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from math import atan, tan, pi
+import itertools
 
 
 def weights_normal_init(model, dev=0.01):
@@ -52,6 +54,24 @@ def load_checkpoint(model, optimizer, pth_file):
     model.load_state_dict(model_dict)
     print('Previous weight loaded')
     return epoch
+
+
+def create_gamma_matrix(H=480, W=640, fx=600, fy=600):
+    fov_x = 2 * atan(W / (2 * fx))
+    fov_y = 2 * atan(H / (2 * fy))
+    gamma = np.zeros((H, W, 2))
+
+    for i, j in itertools.product(range(H), range(W)):
+        alpha_x = (pi - fov_x) / 2
+        gamma_x = alpha_x + fov_x * ((W - j) / W)
+
+        alpha_y = (pi - fov_y) / 2
+        gamma_y = alpha_y + fov_y * ((H - i) / H)
+
+        gamma[i, j, 0] = gamma_x
+        gamma[i, j, 1] = gamma_y
+
+    return gamma
 
 
 def log_smooth_l1_loss(pred, target):

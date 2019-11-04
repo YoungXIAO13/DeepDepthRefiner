@@ -45,12 +45,12 @@ def compute_distance_related_errors(gt,pred):
 
 def compute_global_errors(gt, pred):
     # exclude masked invalid and missing measurements
-    gt=gt[gt!=0]
-    pred=pred[pred!=0]
+    gt = gt[gt != 0]
+    pred = pred[pred != 0]
     
-    #compute global relative errors
+    # compute global relative errors
     thresh = np.maximum((gt / pred), (pred / gt))
-    thr1 = (thresh < 1.25   ).mean()
+    thr1 = (thresh < 1.25).mean()
     thr2 = (thresh < 1.25 ** 2).mean()
     thr3 = (thresh < 1.25 ** 3).mean()
 

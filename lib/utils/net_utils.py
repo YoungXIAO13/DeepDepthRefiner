@@ -99,14 +99,15 @@ def neighbor_depth_variation(depth):
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
 
-def compute_tangent_adjusted_depth(depth_p, normal_p, depth_q, normal_q):
+def compute_tangent_adjusted_depth(depth_p, normal_p, depth_q, normal_q, eps=1e-3):
     # compute the depth map for the middl point
     depth_m = (depth_p + depth_q) / 2
 
     # compute the tangent-adjusted depth map for p and q
-    ratio_p = (depth_p * normal_p).norm(dim=1, keepdim=True) / (depth_m * normal_p).norm(dim=1, keepdim=True)
+    ratio_p = (depth_p * normal_p).norm(dim=1, keepdim=True) / ((depth_m * normal_p).norm(dim=1, keepdim=True) + eps)
     depth_p_tangent = (depth_m * ratio_p).norm(dim=1, keepdim=True)
-    ratio_q = (depth_q * normal_q).norm(dim=1, keepdim=True) / (depth_m * normal_q).norm(dim=1, keepdim=True)
+
+    ratio_q = (depth_q * normal_q).norm(dim=1, keepdim=True) / ((depth_m * normal_q).norm(dim=1, keepdim=True) + eps)
     depth_q_tangent = (depth_m * ratio_q).norm(dim=1, keepdim=True)
 
     return depth_p_tangent - depth_q_tangent
@@ -151,13 +152,15 @@ def occlusion_aware_loss(depth_gt, depth_pred, occlusion, normal, gamma, th=1.):
     depth_point = torch.cat((delta_x, delta_y, depth_pred), 1)
 
     # get neighborhood depth variation in (B, 8, H-2, W-2)
-    depth_var_point = neighbor_depth_variation(depth_point.norm(dim=1, keepdim=True))
+    depth_point_norm = depth_point.norm(dim=1, keepdim=True)
+    depth_var_point = neighbor_depth_variation(depth_point_norm)
     depth_var_tangent = neighbor_depth_variation_tangent(depth_point, normal)
     adjust_mask = (depth_var_tangent > 0).float()
     keep_mask = (depth_var_tangent <= 0).float()
-    depth_var = torch.min(depth_var_point, depth_var_tangent) * adjust_mask + depth_var_point * keep_mask
+    depth_var_correct = (depth_var_point < depth_var_tangent).float() * depth_var_point + (depth_var_point >= depth_var_tangent).float() * depth_var_tangent
+    depth_var = depth_var_correct * adjust_mask + depth_var_point * keep_mask
 
-    # get fg_mask and bg_mask in (B, 8, H-2, W-2)
+    # get masks in (B, 8, H-2, W-2)
     orientation = occlusion[:, 1:, 1:-1, 1:-1]
     fn_fg_mask = ((orientation == 1) * (depth_var > -th)).float()
     fn_bg_mask = ((orientation == -1) * (depth_var < th)).float()
@@ -165,10 +168,10 @@ def occlusion_aware_loss(depth_gt, depth_pred, occlusion, normal, gamma, th=1.):
     fp_bg_mask = ((orientation != -1) * (depth_var > th)).float()
 
     # compute the loss for the four situations
-    fn_fg_loss = ((depth_var + th).relu() * fn_fg_mask).sum() / fn_fg_mask.sum()
-    fn_bg_loss = ((-depth_var + th).relu() * fn_bg_mask).sum() / fn_bg_mask.sum()
-    fp_fg_loss = ((-depth_var - th).relu() * fp_fg_mask).sum() / fp_fg_mask.sum()
-    fp_bg_loss = ((-epth_var - th).relu() * fp_bg_mask).sum() / fp_bg_mask.sum()
+    fn_fg_loss = ((depth_var + th).relu() * fn_fg_mask).sum() / (fn_fg_mask.sum() + 1)
+    fn_bg_loss = ((-depth_var + th).relu() * fn_bg_mask).sum() / (fn_bg_mask.sum() + 1)
+    fp_fg_loss = ((-depth_var - th).relu() * fp_fg_mask).sum() / (fp_fg_mask.sum() + 1)
+    fp_bg_loss = ((-depth_var - th).relu() * fp_bg_mask).sum() / (fp_bg_mask.sum() + 1)
 
     loss_avg = fn_fg_loss + fn_bg_loss + fp_fg_loss + fp_bg_loss
     return loss_avg

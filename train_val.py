@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import os
@@ -63,7 +64,7 @@ if opt.resume:
 
 net.cuda()
 gamma = create_gamma_matrix(480, 640, 600, 600)
-gamma = torch.fromarray(gamma).cuda()
+gamma = torch.from_numpy(gamma).float().cuda()
 # ========================================================== #
 
 

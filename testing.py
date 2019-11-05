@@ -9,8 +9,7 @@ from lib.models.unet import UNet
 from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
 
-from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
-    log_smooth_l1_loss, occlusion_aware_loss
+from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint
 from lib.utils.evaluate_ibims_error_metrics import compute_distance_related_errors, compute_global_errors
 
 # =================PARAMETERS=============================== #

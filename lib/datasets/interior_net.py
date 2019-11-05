@@ -55,6 +55,7 @@ class InteriorNet(data.Dataset):
                            '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
                            '{:04d}{}'.format(self.df.iloc[index]['image'], self.normal_ext))
         normal = cv2.imread(normal_path, -1) / (2 ** 16 - 1) * 2 - 1
+        normal = normal[:, :, ::-1]
 
         # fetch depth prediction
         depth_pred_path = join(self.root_dir, self.pred_dir, self.df.iloc[index]['scene'],

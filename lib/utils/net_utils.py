@@ -74,15 +74,64 @@ def create_gamma_matrix(H=480, W=640, fx=600, fy=600):
     return gamma
 
 
-def log_smooth_l1_loss(pred, target, log=True):
-    valid_mask = (pred != 0) * (target != 0)
-    pred = pred[valid_mask]
-    target = target[valid_mask]
+def huber_loss(pred, target, sigma, log=True):
     if log:
-        pred = pred.log()
-        target = target.log()
-    loss = F.smooth_l1_loss(pred, target)
-    return loss
+        pred = pred.log().clamp(1e-9)
+        target = target.log().clamp(1e-9)
+    diff_abs = torch.abs(pred - target)
+    cond = diff_abs < 1 / (sigma ** 2)
+    loss = torch.where(cond, 0.5 * (sigma * diff_abs) ** 2, diff_abs - 0.5 / (sigma ** 2))
+    return loss.mean()
+
+
+def berhu_loss(pred, target, log=True):
+    if log:
+        pred = pred.log().clamp(1e-9)
+        target = target.log().clamp(1e-9)
+    diff_abs = (pred - target).abs()
+    delta = 0.2 * diff_abs.max()
+    loss = torch.where(diff_abs < delta, diff_abs, (diff_abs ** 2 + delta ** 2) / (2 * delta + 1e-9))
+    return loss.mean()
+
+
+def spatial_gradient_loss(pred, target):
+    sobel_x = torch.Tensor([[1, 0, -1],
+                            [2, 0, -2],
+                            [1, 0, -1]])
+
+    sobel_x = sobel_x.view((1, 1, 3, 3))
+    sobel_x = torch.autograd.Variable(sobel_x.cuda())
+
+    sobel_y = torch.Tensor([[1, 2, 1],
+                            [0, 0, 0],
+                            [-1, -2, -1]])
+
+    sobel_y = sobel_y.view((1, 1, 3, 3))
+    sobel_y = torch.autograd.Variable(sobel_y.cuda())
+
+    diff = pred.clamp(1e-7).log() - target.clamp(1e-7).log()
+
+    gx_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_x, padding=1)
+    gy_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_y, padding=1)
+
+    gradients_diff = torch.pow(gx_diff, 2) + torch.pow(gy_diff, 2)
+    smooth_loss = gradients_diff.mean()
+
+    input = pred.clamp(1e-7).log()
+    target = target.clamp(1e-7).log()
+
+    gx_input = F.conv2d(input, (1.0 / 8.0) * sobel_x, padding=1)
+    gy_input = F.conv2d(input, (1.0 / 8.0) * sobel_y, padding=1)
+
+    gx_target = F.conv2d(target, (1.0 / 8.0) * sobel_x, padding=1)
+    gy_target = F.conv2d(target, (1.0 / 8.0) * sobel_y, padding=1)
+
+    gradients_input = torch.pow(gx_input, 2) + torch.pow(gy_input, 2)
+    gradients_target = torch.pow(gx_target, 2) + torch.pow(gy_target, 2)
+
+    grad_loss = huber_loss(gradients_input, gradients_target, 3, False)
+
+    return smooth_loss + grad_loss
 
 
 def neighbor_depth_variation(depth):

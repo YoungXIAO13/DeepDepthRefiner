@@ -76,9 +76,11 @@ def create_gamma_matrix(H=480, W=640, fx=600, fy=600):
 
 def huber_loss(pred, target, sigma, log=True):
     if log:
-        pred = pred.log().clamp(1e-9)
-        target = target.log().clamp(1e-9)
-    diff_abs = torch.abs(pred - target)
+        pred_log = pred.clamp(1e-9).log()
+        target_log = target.clamp(1e-9).log()
+        diff_abs = torch.abs(pred_log - target_log)
+    else:
+        diff_abs = torch.abs(pred - target)
     cond = diff_abs < 1 / (sigma ** 2)
     loss = torch.where(cond, 0.5 * (sigma * diff_abs) ** 2, diff_abs - 0.5 / (sigma ** 2))
     return loss.mean()
@@ -86,28 +88,28 @@ def huber_loss(pred, target, sigma, log=True):
 
 def berhu_loss(pred, target, log=True):
     if log:
-        pred = pred.log().clamp(1e-9)
-        target = target.log().clamp(1e-9)
-    diff_abs = (pred - target).abs()
+        pred_log = pred.clamp(1e-9).log()
+        target_log = target.clamp(1e-9).log()
+        diff_abs = (pred_log - target_log).abs()
+    else:
+        diff_abs = (pred - target).abs()
     delta = 0.2 * diff_abs.max()
     loss = torch.where(diff_abs < delta, diff_abs, (diff_abs ** 2 + delta ** 2) / (2 * delta + 1e-9))
     return loss.mean()
 
 
 def spatial_gradient_loss(pred, target):
-    sobel_x = torch.Tensor([[1, 0, -1],
-                            [2, 0, -2],
-                            [1, 0, -1]])
+    sobel_x = torch.as_tensor([[1, 0, -1],
+                               [2, 0, -2],
+                               [1, 0, -1]])
 
-    sobel_x = sobel_x.view((1, 1, 3, 3))
-    sobel_x = torch.autograd.Variable(sobel_x.cuda())
+    sobel_x = sobel_x.view((1, 1, 3, 3)).type_as(pred)
 
-    sobel_y = torch.Tensor([[1, 2, 1],
-                            [0, 0, 0],
-                            [-1, -2, -1]])
+    sobel_y = torch.as_tensor([[1, 2, 1],
+                               [0, 0, 0],
+                               [-1, -2, -1]])
 
-    sobel_y = sobel_y.view((1, 1, 3, 3))
-    sobel_y = torch.autograd.Variable(sobel_y.cuda())
+    sobel_y = sobel_y.view((1, 1, 3, 3)).type_as(pred)
 
     diff = pred.clamp(1e-7).log() - target.clamp(1e-7).log()
 
@@ -117,14 +119,14 @@ def spatial_gradient_loss(pred, target):
     gradients_diff = torch.pow(gx_diff, 2) + torch.pow(gy_diff, 2)
     smooth_loss = gradients_diff.mean()
 
-    input = pred.clamp(1e-7).log()
-    target = target.clamp(1e-7).log()
+    pred_log = pred.clamp(1e-7).log()
+    target_log = target.clamp(1e-7).log()
 
-    gx_input = F.conv2d(input, (1.0 / 8.0) * sobel_x, padding=1)
-    gy_input = F.conv2d(input, (1.0 / 8.0) * sobel_y, padding=1)
+    gx_input = F.conv2d(pred_log, (1.0 / 8.0) * sobel_x, padding=1)
+    gy_input = F.conv2d(pred_log, (1.0 / 8.0) * sobel_y, padding=1)
 
-    gx_target = F.conv2d(target, (1.0 / 8.0) * sobel_x, padding=1)
-    gy_target = F.conv2d(target, (1.0 / 8.0) * sobel_y, padding=1)
+    gx_target = F.conv2d(target_log, (1.0 / 8.0) * sobel_x, padding=1)
+    gy_target = F.conv2d(target_log, (1.0 / 8.0) * sobel_y, padding=1)
 
     gradients_input = torch.pow(gx_input, 2) + torch.pow(gy_input, 2)
     gradients_target = torch.pow(gx_target, 2) + torch.pow(gy_target, 2)
@@ -134,16 +136,16 @@ def spatial_gradient_loss(pred, target):
     return smooth_loss + grad_loss
 
 
-def neighbor_depth_variation(depth):
+def neighbor_depth_variation(depth, diagonal=np.sqrt(2)):
     """Compute the variation of depth values in the neighborhood-8 of each pixel"""
-    var1 = (depth[..., 1:-1, 1:-1] - depth[..., :-2, :-2]) / np.sqrt(2)
+    var1 = (depth[..., 1:-1, 1:-1] - depth[..., :-2, :-2]) / diagonal
     var2 = depth[..., 1:-1, 1:-1] - depth[..., :-2, 1:-1]
-    var3 = (depth[..., 1:-1, 1:-1] - depth[..., :-2, 2:]) / np.sqrt(2)
+    var3 = (depth[..., 1:-1, 1:-1] - depth[..., :-2, 2:]) / diagonal
     var4 = depth[..., 1:-1, 1:-1] - depth[..., 1:-1, :-2]
     var6 = depth[..., 1:-1, 1:-1] - depth[..., 1:-1, 2:]
-    var7 = (depth[..., 1:-1, 1:-1] - depth[..., 2:, :-2]) / np.sqrt(2)
+    var7 = (depth[..., 1:-1, 1:-1] - depth[..., 2:, :-2]) / diagonal
     var8 = depth[..., 1:-1, 1:-1] - depth[..., 2:, 1:-1]
-    var9 = (depth[..., 1:-1, 1:-1] - depth[..., 2:, 2:]) / np.sqrt(2)
+    var9 = (depth[..., 1:-1, 1:-1] - depth[..., 2:, 2:]) / diagonal
     
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
@@ -162,34 +164,33 @@ def compute_tangent_adjusted_depth(depth_p, normal_p, depth_q, normal_q, eps=1e-
     return depth_p_tangent - depth_q_tangent
 
 
-def neighbor_depth_variation_tangent(depth, normal):
+def neighbor_depth_variation_tangent(depth, normal, diagonal=np.sqrt(2)):
     """Compute the variation of tangent-adjusted depth values in the neighborhood-8 of each pixel"""
     depth_crop = depth[..., 1:-1, 1:-1]
     normal_crop = normal[..., 1:-1, 1:-1]
     var1 = compute_tangent_adjusted_depth(
-        depth_crop, normal_crop, depth[..., :-2, :-2], normal[..., :-2, :-2]) / np.sqrt(2)
+        depth_crop, normal_crop, depth[..., :-2, :-2], normal[..., :-2, :-2]) / diagonal
     var2 = compute_tangent_adjusted_depth(
         depth_crop, normal_crop, depth[..., :-2, 1:-1], normal[..., :-2, 1:-1])
     var3 = compute_tangent_adjusted_depth(
-        depth_crop, normal_crop, depth[..., :-2, 2:], normal[..., :-2, 2:]) / np.sqrt(2)
+        depth_crop, normal_crop, depth[..., :-2, 2:], normal[..., :-2, 2:]) / diagonal
     var4 = compute_tangent_adjusted_depth(
         depth_crop, normal_crop, depth[..., 1:-1, :-2], normal[..., 1:-1, :-2])
     var6 = compute_tangent_adjusted_depth(
         depth_crop, normal_crop, depth[..., 1:-1, 2:], normal[..., 1:-1, 2:])
     var7 = compute_tangent_adjusted_depth(
-        depth_crop, normal_crop, depth[..., 2:, :-2], normal[..., 2:, :-2]) / np.sqrt(2)
+        depth_crop, normal_crop, depth[..., 2:, :-2], normal[..., 2:, :-2]) / diagonal
     var8 = compute_tangent_adjusted_depth(
         depth_crop, normal_crop, depth[..., 2:, 1:-1], normal[..., 2:, 1:-1])
     var9 = compute_tangent_adjusted_depth(
-        depth_crop, normal_crop, depth[..., 2:, 2:], normal[..., 2:, 2:]) / np.sqrt(2) 
+        depth_crop, normal_crop, depth[..., 2:, 2:], normal[..., 2:, 2:]) / diagonal
     
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
 
-def occlusion_aware_loss(depth_gt, depth_pred, occlusion, normal, gamma, th=1.):
+def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, linear=True, th=1., diagonal=np.sqrt(2)):
     """
     Compute a distance between depth maps using the occlusion orientation
-    :param depth_gt: (B, 1, H, W)
     :param depth_pred: (B, 1, H, W)
     :param occlusion: (B, 9, H, W)
     :param normal: (B, 3, H, W)
@@ -202,26 +203,26 @@ def occlusion_aware_loss(depth_gt, depth_pred, occlusion, normal, gamma, th=1.):
 
     # get neighborhood depth variation in (B, 8, H-2, W-2)
     depth_point_norm = depth_point.norm(dim=1, keepdim=True)
-    depth_var_point = neighbor_depth_variation(depth_point_norm)
-    depth_var_tangent = neighbor_depth_variation_tangent(depth_point, normal)
-    adjust_mask = (depth_var_tangent > 0).float()
-    keep_mask = (depth_var_tangent <= 0).float()
-    depth_var_correct = (depth_var_point < depth_var_tangent).float() * depth_var_point + (depth_var_point >= depth_var_tangent).float() * depth_var_tangent
-    depth_var = depth_var_correct * adjust_mask + depth_var_point * keep_mask
+    depth_var_point = neighbor_depth_variation(depth_point_norm, diagonal)
+    depth_var_tangent = neighbor_depth_variation_tangent(depth_point, normal, diagonal)
+    depth_var_min = torch.min(depth_var_tangent, depth_var_point)
+    depth_var_geo = torch.where(depth_var_tangent > 0, depth_var_min, depth_var_point)
 
     # get masks in (B, 8, H-2, W-2)
     orientation = occlusion[:, 1:, 1:-1, 1:-1]
-    fn_fg_mask = ((orientation == 1) * (depth_var > -th)).float()
-    fn_bg_mask = ((orientation == -1) * (depth_var < th)).float()
-    fp_fg_mask = ((orientation != 1) * (depth_var < -th)).float()
-    fp_bg_mask = ((orientation != -1) * (depth_var > th)).float()
+    fn_mask = ((orientation != 0) * (depth_var_point.abs() < th)).float()
+    fp_mask = ((orientation == 0) * (depth_var_geo.abs() > th)).float()
 
     # compute the loss for the four situations
-    fn_fg_loss = ((depth_var + th).relu() * fn_fg_mask).sum() / (fn_fg_mask.sum() + 1)
-    fn_bg_loss = ((-depth_var + th).relu() * fn_bg_mask).sum() / (fn_bg_mask.sum() + 1)
-    fp_fg_loss = ((-depth_var - th).relu() * fp_fg_mask).sum() / (fp_fg_mask.sum() + 1)
-    fp_bg_loss = ((-depth_var - th).relu() * fp_bg_mask).sum() / (fp_bg_mask.sum() + 1)
+    if linear:
+        th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
+        fn_loss = huber_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0], th)
+        fp_loss = huber_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0], th)
+    else:
+        th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
+        fn_loss = berhu_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0])
+        fp_loss = berhu_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0])
 
-    loss_avg = fn_fg_loss + fn_bg_loss + fp_fg_loss + fp_bg_loss
+    loss_avg = fn_loss + fp_loss
     return loss_avg
 

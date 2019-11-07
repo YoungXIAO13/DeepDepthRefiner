@@ -9,9 +9,9 @@ import itertools
 
 
 def point_to_plane(depth_path, fx=600, fy=600):
-    depth = cv2.imread(depth_path, -1).copy()
+    depth = cv2.imread(depth_path, -1)
     H, W = depth.shape
-    depth_plane = depth / 1000
+    depth_plane = depth.copy()
 
     # compute field of view
     fov_x = 2 * atan(W / (2 * fx))
@@ -20,15 +20,14 @@ def point_to_plane(depth_path, fx=600, fy=600):
     for i, j in itertools.product(range(H), range(W)):
         alpha_x = (pi - fov_x) / 2
         gamma_x = alpha_x + fov_x * ((W - j) / W)
-        delta_x = depth_plane[i, j] / tan(gamma_x)
 
         alpha_y = (pi - fov_y) / 2
         gamma_y = alpha_y + fov_y * ((H - i) / H)
-        delta_y = depth_plane[i, j] / tan(gamma_y)
 
-        depth_plane[i, j] = np.sqrt(depth_plane[i, j] ** 2 - delta_x ** 2 - delta_y ** 2)
+        #delta_x = depth_plane[i, j] / tan(gamma_x)
+        #delta_y = depth_plane[i, j] / tan(gamma_y)
 
-    depth_plane *= 1000
+        depth_plane[i, j] = np.sqrt(depth[i, j] ** 2 / (1 + 1 / (tan(gamma_x) ** 2) + 1 / (tan(gamma_y) ** 2)))
 
     return depth_plane.astype(depth.dtype)
 

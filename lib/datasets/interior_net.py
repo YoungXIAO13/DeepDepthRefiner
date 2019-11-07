@@ -77,14 +77,16 @@ if __name__ == "__main__":
     dataset = InteriorNet(root_dir)
     print(len(dataset))
 
+    from tqdm import tqdm
     from torch.utils.data import DataLoader
     import sys
-    import time
     test_loader = DataLoader(dataset, batch_size=4, shuffle=False)
-    begin = time.time()
-    for i, data in enumerate(test_loader):
-        data = data
-        print(time.time() - begin)
+    depth_max = []
+
+    for i, data in tqdm(enumerate(test_loader)):
+        # depth_max.append(data[0].max().item())
         if i == 0:
             print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
             sys.exit()
+
+    # print(np.array(depth_max).max())

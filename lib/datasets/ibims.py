@@ -24,26 +24,26 @@ class Ibims(data.Dataset):
         return len(self.im_names)
 
     def __getitem__(self, index):
-        depth_gt, depth_pred, label = self._fetch_data(index)
+        depth_gt, depth_pred, label, edge = self._fetch_data(index)
 
         depth_gt = torch.from_numpy(np.ascontiguousarray(depth_gt)).float().unsqueeze(0)
         depth_pred = torch.from_numpy(np.ascontiguousarray(depth_pred)).float().unsqueeze(0)
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
 
-        return depth_gt, depth_pred, label
+        return depth_gt, depth_pred, label, edge
 
     def _fetch_data(self, index):
         # fetch depth map in meters
         depth_gt_mat = join(self.root_dir, self.gt_dir, '{}.mat'.format(self.im_names[index]))
         depth_pred_mat = join(self.root_dir, self.method_name, '{}_predictions_{}_results.mat'.format(
             self.im_names[index], self.method_name))
-        depth_gt, depth_pred = self._load_depths_from_mat(depth_gt_mat, depth_pred_mat)
+        depth_gt, depth_pred, edge = self._load_depths_from_mat(depth_gt_mat, depth_pred_mat)
 
         # fetch occlusion orientation labels
         label_path = join(self.root_dir, self.label_dir, self.im_names[index] + self.label_ext)
         label = np.load(label_path)
 
-        return depth_gt, depth_pred, label
+        return depth_gt, depth_pred, label, edge
 
     def _load_depths_from_mat(self, gt_mat, pred_mat):
         # load prediction depth
@@ -60,6 +60,7 @@ class Ibims(data.Dataset):
         depth = data['depth'][0][0]  # Raw depth map
         mask_invalid = data['mask_invalid'][0][0]  # Mask for invalid pixels
         mask_transp = data['mask_transp'][0][0]  # Mask for transparent pixels
+        edge = data['edges'][0][0]
 
         mask_missing = depth.copy()  # Mask for further missing depth values in depth map
         mask_missing[mask_missing != 0] = 1
@@ -68,12 +69,12 @@ class Ibims(data.Dataset):
 
         depth_valid = depth * mask_valid
         pred_valid = pred * mask_valid
-        return depth_valid, pred_valid
+        return depth_valid, pred_valid, edge
 
 
 if __name__ == "__main__":
     root_dir = '/space_sdd/ibims'
-    method_name = 'junli'
+    method_name = 'sharpnet'
     dataset = Ibims(root_dir, method_name)
     print(len(dataset))
 
@@ -86,5 +87,5 @@ if __name__ == "__main__":
         data = data
         print(time.time() - begin)
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
             sys.exit()

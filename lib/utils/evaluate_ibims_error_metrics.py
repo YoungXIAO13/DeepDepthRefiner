@@ -15,29 +15,31 @@ import math
 import matplotlib.pyplot as plt
 
 
-def compute_distance_related_errors(gt,pred):
+def compute_distance_related_errors(gt, pred):
     #initialize output
     abs_rel_vec_tmp = np.zeros(20, np.float32)
     log10_vec_tmp   = np.zeros(20, np.float32)
     rms_vec_tmp     = np.zeros(20, np.float32)
     
    
-     # exclude masked invalid and missing measurements
-    gt=gt[gt!=0]
-    pred=pred[pred!=0]
+    # exclude masked invalid and missing measurements
+    gt = gt[gt != 0]
+    pred = pred[pred != 0]
 
     gt_all = gt
     pred_all = pred
     bot = 0.0
     idx = 0
-    for top in range(1,21):
-        mask = np.logical_and(gt_all>=bot, gt_all<=top)
+
+    for top in range(1, 21):
+        mask = np.logical_and(gt_all >= bot, gt_all <= top)
         gt_tmp = gt_all[mask]
         pred_tmp = pred_all[mask]
         # calc errors
-        abs_rel_vec_tmp[idx], tmp , rms_vec_tmp[idx], log10_vec_tmp[idx], tmp, tmp, tmp = compute_global_errors(gt_tmp,pred_tmp)
-        
-        bot = top #re-assign bottom threshold
+        abs_rel_vec_tmp[idx], tmp, rms_vec_tmp[idx], log10_vec_tmp[idx], tmp, tmp, tmp = compute_global_errors(
+            gt_tmp, pred_tmp)
+
+        bot = top  # re-assign bottom threshold
         idx = idx + 1
      
     return abs_rel_vec_tmp,log10_vec_tmp,rms_vec_tmp
@@ -71,27 +73,27 @@ def compute_global_errors(gt, pred):
 
 def compute_directed_depth_error(gt, pred, thr): 
     # exclude masked invalid and missing measurements
-    gt=gt[gt!=0]
-    pred=pred[pred!=0]
+    gt = gt[gt != 0]
+    pred = pred[pred != 0]
     
     # number of valid depth values 
     nPx = float(len(gt))
+
+    gt[gt <= thr] = 1  # assign depths closer as 'thr' as '1s'
+    gt[gt > thr] = 0  # assign depths farer as 'thr' as '0s'
+    pred[pred <= thr] = 1
+    pred[pred > thr] = 0
     
-    gt[gt<=thr]=1 # assign depths closer as 'thr' as '1s'
-    gt[gt>thr]=0 # assign depths farer as 'thr' as '0s'
-    pred[pred<=thr]=1
-    pred[pred>thr]=0
-    
-    diff = pred-gt  # compute difference map
-    
-    dde_0 = np.sum(diff==0)/nPx
-    dde_m = np.sum(diff==1)/nPx
-    dde_p = np.sum(diff==-1)/nPx
+    diff = pred - gt  # compute difference map
+
+    dde_0 = np.sum(diff == 0) / nPx
+    dde_m = np.sum(diff == 1) / nPx
+    dde_p = np.sum(diff == -1) / nPx
     
     return dde_0, dde_m, dde_p
 
 
-def compute_depth_boundary_error(edges_gt,pred):
+def compute_depth_boundary_error(edges_gt, pred):
     # skip dbe if there is no ground truth distinct edge
      if np.sum(edges_gt) == 0:
         dbe_acc = np.nan

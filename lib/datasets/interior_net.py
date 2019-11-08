@@ -10,15 +10,17 @@ import torch.utils.data as data
 
 
 class InteriorNet(data.Dataset):
-    def __init__(self, root_dir, preprocess=None, 
-                 label_name='_raycastingV2', method_name='sharpnet_pred',
-                 gt_dir='data', label_dir='label', pred_dir='pred',
-                 depth_ext='-depth-plane.png', normal_ext='-normal.png', label_ext='-order-pix.npy'):
+    def __init__(self, root_dir, use_im=False, preprocess=None, label_name='_raycastingV2',
+                 pred_dir='pred', method_name='sharpnet_pred',
+                 gt_dir='data', depth_ext='-depth-plane.png', normal_ext='-normal.png', im_ext='-rgb.png',
+                 label_dir='label', label_ext='-order-pix.npy'):
         super(InteriorNet, self).__init__()
         self.root_dir = root_dir
+        self.use_im = use_im
         self.preprocess = preprocess
         self.label_name = label_name
         self.method_name = method_name
+        self.im_ext = im_ext
         self.gt_dir = gt_dir
         self.label_dir = label_dir
         self.pred_dir = pred_dir
@@ -41,7 +43,17 @@ class InteriorNet(data.Dataset):
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
         normal = torch.from_numpy(np.ascontiguousarray(normal)).float().permute(2, 0, 1)
 
-        return depth_gt, depth_pred, label, normal
+        # fetch image if called
+        if self.use_im:
+            im_path = join(self.root_dir, self.gt_dir,
+                           '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
+                           '{:04d}{}'.format(self.df.iloc[index]['image'], self.im_ext))
+            im = cv2.imread(im_path, -1)
+            im = torch.from_numpy(np.ascontiguousarray(im)).float().permute(2, 0, 1) / 255
+        else:
+            im = torch.as_tensor(0)
+
+        return depth_gt, depth_pred, label, normal, im
 
     def _fetch_data(self, index):
         # fetch depth map in meters
@@ -74,19 +86,15 @@ class InteriorNet(data.Dataset):
 
 if __name__ == "__main__":
     root_dir = '/space_sdd/InteriorNet'
-    dataset = InteriorNet(root_dir)
+    dataset = InteriorNet(root_dir, use_im=True)
     print(len(dataset))
 
     from tqdm import tqdm
     from torch.utils.data import DataLoader
     import sys
     test_loader = DataLoader(dataset, batch_size=4, shuffle=False)
-    depth_max = []
 
     for i, data in tqdm(enumerate(test_loader)):
-        # depth_max.append(data[0].max().item())
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
             sys.exit()
-
-    # print(np.array(depth_max).max())

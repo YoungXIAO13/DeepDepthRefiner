@@ -103,3 +103,6 @@ venv.bak/
 .mypy_cache/
 .idea/
 *.sh
+*.out
+result/
+model/

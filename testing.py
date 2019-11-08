@@ -10,10 +10,9 @@ matplotlib.use('agg')  # use matplotlib without GUI support
 import matplotlib.pyplot as plt
 
 from lib.models.unet import UNet
-from lib.models.ynet import YNet
 from lib.datasets.ibims import Ibims
 
-from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint
+from lib.utils.net_utils import load_checkpoint
 from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
     compute_depth_boundary_error, compute_directed_depth_error
 
@@ -21,11 +20,10 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network training procedure settings
-parser.add_argument('--model', type=str, default='unet', help='resume checkpoint or not')
+parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
 # pth settings
-parser.add_argument('--session', type=int, default=0, help='training session')
 parser.add_argument('--checkpoint', type=str, default=None, help='optional reload model path')
 parser.add_argument('--result_dir', type=str, default='result', help='result folder')
 
@@ -39,14 +37,13 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_val = Ibims(opt.val_dir, opt.val_method)
+dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet() if opt.model == 'unet' else YNet()
-net.apply(kaiming_init)
+net = UNet()
 optimizer = optim.Adam(net.parameters(), lr=opt.lr, weight_decay=0.0005)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -78,11 +75,11 @@ def test(data_loader, net, result_dir):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge = data
-            depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda()
+            depth_gt, depth_coarse, occlusion, edge, im = data
+            depth_gt, depth_coarse, occlusion, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), im.cuda()
 
             # forward pass
-            depth_pred = net(occlusion, depth_coarse).clamp(1e-9)
+            depth_pred = net(depth_coarse, occlusion, im).clamp(1e-9)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()
@@ -104,8 +101,8 @@ def test(data_loader, net, result_dir):
             plt.imsave(gt_name, gt)
             plt.imsave(pred_name, pred)
             plt.imsave(init_name, init)
-            plt.imsave(pred_error_name, gt - pred)
-            plt.imsave(init_error_name, gt - init)
+            # plt.imsave(pred_error_name, gt - pred)
+            # plt.imsave(init_error_name, gt - init)
 
             gt_vec = gt.flatten()
             pred_vec = pred.flatten()
@@ -118,7 +115,8 @@ def test(data_loader, net, result_dir):
 # ========================================================== #
 
 
-result_dir = os.path.join(opt.result_dir, 'session_{}_{}'.format(opt.session, opt.val_method))
+session_name = os.path.basename(os.path.dirname(opt.checkpoint))
+result_dir = os.path.join(opt.result_dir, session_name, opt.val_method)
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 

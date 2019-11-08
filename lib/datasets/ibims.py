@@ -2,20 +2,23 @@ import os
 from os.path import join
 import torch
 import numpy as np
+import cv2
 from scipy import io
 
 import torch.utils.data as data
 
 
 class Ibims(data.Dataset):
-    def __init__(self, root_dir, method_name,
-                 gt_dir='gt_depth', label_dir='label', label_ext='-order-pix.npy'):
+    def __init__(self, root_dir, method_name, use_im=False,
+                 im_dir='ibims1_core_raw/rgb', gt_dir='gt_depth', label_dir='label', label_ext='-order-pix.npy'):
         super(Ibims, self).__init__()
         self.root_dir = root_dir
+        self.im_dir = im_dir
         self.gt_dir = gt_dir
-        self.method_name = method_name
         self.label_dir = label_dir
         self.label_ext = label_ext
+        self.method_name = method_name
+        self.use_im = use_im
         with open(join(self.root_dir, 'imagelist.txt')) as f:
             image_names = f.readlines()
         self.im_names = [x.strip() for x in image_names]
@@ -30,7 +33,15 @@ class Ibims(data.Dataset):
         depth_pred = torch.from_numpy(np.ascontiguousarray(depth_pred)).float().unsqueeze(0)
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
 
-        return depth_gt, depth_pred, label, edge
+        # fetch image if called
+        if self.use_im:
+            im_path = join(self.root_dir, self.im_dir, '{}.png'.format(self.im_names[index]))
+            im = cv2.imread(im_path, -1)
+            im = torch.from_numpy(np.ascontiguousarray(im)).float().permute(2, 0, 1) / 255
+        else:
+            im = torch.as_tensor(0)
+
+        return depth_gt, depth_pred, label, edge, im
 
     def _fetch_data(self, index):
         # fetch depth map in meters
@@ -75,7 +86,7 @@ class Ibims(data.Dataset):
 if __name__ == "__main__":
     root_dir = '/space_sdd/ibims'
     method_name = 'sharpnet'
-    dataset = Ibims(root_dir, method_name)
+    dataset = Ibims(root_dir, method_name, use_im=True)
     print(len(dataset))
 
     from torch.utils.data import DataLoader
@@ -87,5 +98,5 @@ if __name__ == "__main__":
         data = data
         print(time.time() - begin)
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
             sys.exit()

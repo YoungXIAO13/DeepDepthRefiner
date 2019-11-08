@@ -20,9 +20,11 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network and loss settings
-parser.add_argument('--model', type=str, default='unet', help='resume checkpoint or not')
+parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_occ', type=bool, default=True, help='whether to use occlusion as network input')
 parser.add_argument('--linear', action='store_true', help='linear geometric occlusion-depth loss')
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
+parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
 
 # optimization settings
@@ -51,8 +53,8 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
-dataset_val = Ibims(opt.val_dir, opt.val_method)
+dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method, use_im=opt.use_im)
+dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im)
 
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=opt.workers)
@@ -60,7 +62,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet() if opt.model == 'unet' else YNet()
+net = UNet(use_occ=opt.use_occ, use_im=opt.use_im)
 net.apply(kaiming_init)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
@@ -78,7 +80,7 @@ gamma = torch.from_numpy(gamma).float().cuda()
 
 
 # =============DEFINE stuff for logs ======================= #
-result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_{}_{}'.format(opt.model, opt.session))
+result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_{}'.format(opt.session))
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')
@@ -95,16 +97,18 @@ def train(data_loader, net, optimizer):
     end = time.time()
     for i, data in enumerate(data_loader):
         # load data and label
-        depth_gt, depth_coarse, occlusion, normal = data
-        depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+        depth_gt, depth_coarse, occlusion, normal, im = data
+        depth_gt, depth_coarse, occlusion, normal, im = \
+            depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), im.cuda()
 
         # forward pass
-        depth_pred = net(occlusion, depth_coarse)
+        depth_pred = net(depth_coarse, occlusion, im)
 
         # compute losses and update the meters
-        loss_depth_gt = berhu_loss(depth_pred, depth_gt) + spatial_gradient_loss(depth_pred, depth_gt)
+        loss_depth_gt = berhu_loss(depth_pred, depth_gt)
+        loss_depth_geo = spatial_gradient_loss(depth_pred, depth_gt)
         loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, opt.linear, 15. / 1000, 1)
-        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_occ * loss_depth_occ
+        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_geo * loss_depth_geo + opt.alpha_occ * loss_depth_occ
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -143,11 +147,11 @@ def val(data_loader, net):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge = data
-            depth_gt, depth_coarse, occlusion = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda()
+            depth_gt, depth_coarse, occlusion, edge, im = data
+            depth_gt, depth_coarse, occlusion, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), im.cuda()
 
             # forward pass
-            depth_pred = net(occlusion, depth_coarse).clamp(1e-9)
+            depth_pred = net(depth_coarse, occlusion, im).clamp(1e-9)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()
@@ -219,8 +223,10 @@ for epoch in range(start_epoch, opt.epoch):
         f.write('dde_p  = {:.3f}\n\n'.format(np.nanmean(dde_p) * 100.))
 
     # update best_rms and save checkpoint
-    save_checkpoint({
-        'epoch': epoch,
-        'model': net.state_dict(),
-        'optimizer': optimizer.state_dict()
-    }, os.path.join(result_path, 'checkpoint_{}.pth'.format(epoch)))
+    if np.nanmean(rms) < best_rms:
+        best_rms = np.nanmean(rms)
+        save_checkpoint({
+            'epoch': epoch,
+            'model': net.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }, os.path.join(result_path, 'checkpoint_{}_{:.2f}.pth'.format(epoch, best_rms)))

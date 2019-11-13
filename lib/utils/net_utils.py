@@ -98,7 +98,7 @@ def berhu_loss(pred, target, log=True):
     return loss.mean()
 
 
-def spatial_gradient_loss(pred, target):
+def spatial_gradient_loss(pred, target, mask):
     sobel_x = torch.as_tensor([[1, 0, -1],
                                [2, 0, -2],
                                [1, 0, -1]])
@@ -111,16 +111,16 @@ def spatial_gradient_loss(pred, target):
 
     sobel_y = sobel_y.view((1, 1, 3, 3)).type_as(pred)
 
-    diff = pred.clamp(1e-7).log() - target.clamp(1e-7).log()
+    pred_log = (pred * mask).clamp(1e-7).log()
+    target_log = (target * mask).clamp(1e-7).log()
+
+    diff = pred_log - target_log
 
     gx_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_x, padding=1)
     gy_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_y, padding=1)
 
     gradients_diff = torch.pow(gx_diff, 2) + torch.pow(gy_diff, 2)
     smooth_loss = gradients_diff.mean()
-
-    pred_log = pred.clamp(1e-7).log()
-    target_log = target.clamp(1e-7).log()
 
     gx_input = F.conv2d(pred_log, (1.0 / 8.0) * sobel_x, padding=1)
     gy_input = F.conv2d(pred_log, (1.0 / 8.0) * sobel_y, padding=1)
@@ -188,7 +188,7 @@ def neighbor_depth_variation_tangent(depth, normal, diagonal=np.sqrt(2)):
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
 
-def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, linear=True, th=1., diagonal=np.sqrt(2)):
+def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=np.sqrt(2)):
     """
     Compute a distance between depth maps using the occlusion orientation
     :param depth_pred: (B, 1, H, W)
@@ -210,18 +210,13 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, linear=True, th=1
 
     # get masks in (B, 8, H-2, W-2)
     orientation = occlusion[:, 1:, 1:-1, 1:-1]
-    fn_mask = ((orientation != 0) * (depth_var_point.abs() < th)).float()
-    fp_mask = ((orientation == 0) * (depth_var_geo.abs() > th)).float()
 
     # compute the loss for the four situations
-    if linear:
-        th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
-        fn_loss = huber_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0], th)
-        fp_loss = huber_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0], th)
-    else:
-        th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
-        fn_loss = berhu_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0])
-        fp_loss = berhu_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0])
+    fn_mask = ((orientation != 0) * (depth_var_point.abs() < th)).float()
+    fp_mask = ((orientation == 0) * (depth_var_geo.abs() > th)).float()
+    th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
+    fn_loss = berhu_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0])
+    fp_loss = berhu_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0])
 
     loss_avg = fn_loss + fp_loss
     return loss_avg

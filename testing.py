@@ -21,6 +21,9 @@ parser = argparse.ArgumentParser()
 
 # network training procedure settings
 parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_occ', type=bool, default=True, help='whether to use occlusion as network input')
+parser.add_argument('--cat_all', action='store_true', help='whether to concatenate all maps in decoder')
+
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
 # pth settings
@@ -30,6 +33,8 @@ parser.add_argument('--result_dir', type=str, default='result', help='result fol
 # dataset settings
 parser.add_argument('--val_dir', type=str, default='/space_sdd/ibims', help='testing dataset')
 parser.add_argument('--val_method', type=str, default='junli')
+parser.add_argument('--val_label_dir', type=str, default='contour_pred')
+parser.add_argument('--val_label_ext', type=str, default='-rgb-order-pix.npy')
 
 opt = parser.parse_args()
 print(opt)
@@ -37,13 +42,14 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im)
+dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im,
+                    label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet()
+net = UNet(use_occ=opt.use_occ, use_im=opt.use_im, cat_all=opt.cat_all)
 optimizer = optim.Adam(net.parameters(), lr=opt.lr, weight_decay=0.0005)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -115,8 +121,10 @@ def test(data_loader, net, result_dir):
 # ========================================================== #
 
 
+# save refined depth predictions
 session_name = os.path.basename(os.path.dirname(opt.checkpoint))
-result_dir = os.path.join(opt.result_dir, session_name, opt.val_method)
+testing_mode = 'gt' if opt.val_label_dir == 'label' else 'pred'
+result_dir = os.path.join(opt.result_dir, session_name, opt.val_method, testing_mode)
 if not os.path.exists(result_dir):
     os.makedirs(result_dir)
 
@@ -135,3 +143,22 @@ print('############ Directed Depth Error Metrics #################')
 print('dde_0  = ',  np.nanmean(dde_0)*100.)
 print('dde_m  = ',  np.nanmean(dde_m)*100.)
 print('dde_p  = ',  np.nanmean(dde_p)*100.)
+
+
+# log testing reults
+logname = os.path.join(result_dir, 'testing_{}.txt'.format(testing_mode))
+with open(logname, 'w') as f:
+    f.write('############ Global Error Metrics #################\n')
+    f.write('rel    =  {:.3f}\n'.format(np.nanmean(abs_rel)))
+    f.write('log10  =  {:.3f}\n'.format(np.nanmean(log10)))
+    f.write('rms    =  {:.3f}\n'.format(np.nanmean(rms)))
+    f.write('thr1   =  {:.3f}\n'.format(np.nanmean(thr1)))
+    f.write('thr2   =  {:.3f}\n'.format(np.nanmean(thr2)))
+    f.write('thr3   =  {:.3f}\n'.format(np.nanmean(thr3)))
+    f.write('############ Depth Boundary Error Metrics #################\n')
+    f.write('dbe_acc = {:.3f}\n'.format(np.nanmean(dbe_acc)))
+    f.write('dbe_com = {:.3f}\n'.format(np.nanmean(dbe_com)))
+    f.write('############ Directed Depth Error Metrics #################\n')
+    f.write('dde_0  = {:.3f}\n'.format(np.nanmean(dde_0) * 100.))
+    f.write('dde_m  = {:.3f}\n'.format(np.nanmean(dde_m) * 100.))
+    f.write('dde_p  = {:.3f}\n\n'.format(np.nanmean(dde_p) * 100.))

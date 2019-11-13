@@ -53,6 +53,10 @@ class Ibims(data.Dataset):
         # fetch occlusion orientation labels
         label_path = join(self.root_dir, self.label_dir, self.im_names[index] + self.label_ext)
         label = np.load(label_path)
+        contour = np.zeros(label[:, :, 0].shape)
+        mask = label[:, :, 0] >= 0.5
+        contour[mask] = 1
+        label[:, :, 0] = contour
 
         return depth_gt, depth_pred, label, edge
 
@@ -86,7 +90,7 @@ class Ibims(data.Dataset):
 if __name__ == "__main__":
     root_dir = '/space_sdd/ibims'
     method_name = 'sharpnet'
-    dataset = Ibims(root_dir, method_name, use_im=True)
+    dataset = Ibims(root_dir, method_name, use_im=True, label_dir='contour_pred', label_ext='-rgb-order-pix.npy')
     print(len(dataset))
 
     from torch.utils.data import DataLoader

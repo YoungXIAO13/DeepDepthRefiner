@@ -7,7 +7,6 @@ import os
 import time
 
 from lib.models.unet import UNet
-from lib.models.ynet import YNet
 from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
 
@@ -22,7 +21,9 @@ parser = argparse.ArgumentParser()
 # network and loss settings
 parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', type=bool, default=True, help='whether to use occlusion as network input')
-parser.add_argument('--linear', action='store_true', help='linear geometric occlusion-depth loss')
+parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
+parser.add_argument('--cat_all', action='store_true', help='whether to concatenate all maps in decoder')
+
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
@@ -62,7 +63,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_im=opt.use_im)
+net = UNet(use_occ=opt.use_occ, use_im=opt.use_im, cat_all=opt.cat_all)
 net.apply(kaiming_init)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
@@ -105,10 +106,15 @@ def train(data_loader, net, optimizer):
         depth_pred = net(depth_coarse, occlusion, im)
 
         # compute losses and update the meters
+        if opt.mask:
+            mask = (occlusion[:, 0, :, :] == 0).float().unsqueeze(1)
+        else:
+            mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
-        loss_depth_geo = spatial_gradient_loss(depth_pred, depth_gt)
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, opt.linear, 15. / 1000, 1)
-        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_geo * loss_depth_geo + opt.alpha_occ * loss_depth_occ
+
+        loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
+        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -118,8 +124,10 @@ def train(data_loader, net, optimizer):
         end = time.time()
 
         if i % opt.print_freq == 0:
-            print("\tEpoch {} --- Iter [{}/{}] Train loss: {:.3f} + {:.3f} || Batch time: {:.3f}".format(
-                  epoch, i + 1, len(data_loader), opt.alpha_depth * loss_depth_gt.item(),
+            print("\tEpoch {} --- Iter [{}/{}] Train loss: {:.3f} + {:.3f} + {:.3f} || Batch time: {:.3f}".format(
+                  epoch, i + 1, len(data_loader), 
+                  opt.alpha_depth * loss_depth_gt.item(),
+                  opt.alpha_grad * loss_depth_grad.item(),
                   opt.alpha_occ * loss_depth_occ.item(), batch_time))
 # ========================================================== #
 
@@ -230,3 +238,10 @@ for epoch in range(start_epoch, opt.epoch):
             'model': net.state_dict(),
             'optimizer': optimizer.state_dict()
         }, os.path.join(result_path, 'checkpoint_{}_{:.2f}.pth'.format(epoch, best_rms)))
+    else:
+        save_checkpoint({
+            'epoch': epoch,
+            'model': net.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }, os.path.join(result_path, 'checkpoint_last.pth'))
+

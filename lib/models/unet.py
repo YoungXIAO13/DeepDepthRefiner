@@ -4,21 +4,24 @@ from .basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
 
 
 class UNet(nn.Module):
-    def __init__(self, depth_channels=1, occ_channels=9, im_channels=3, use_occ=True, use_im=False):
+    def __init__(self, depth_channels=1, occ_channels=9, im_channels=3, use_occ=True, use_im=False, cat_all=True):
         super(UNet, self).__init__()
         self.use_im = use_im
         self.use_occ = use_occ
+        self.cat_all = cat_all
 
         self.down_scale = nn.MaxPool2d(2)
         self.up_scale = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        all_channels = depth_channels
+        in_channels = depth_channels
         if use_occ:
-            all_channels += occ_channels
+            in_channels += occ_channels
         if use_im:
-            all_channels += im_channels
+            in_channels += im_channels
 
-        self.depth_down_layer0 = ConvBnLeakyRelu(all_channels, 32, 3, 1, 1, 1, 1,
+        out_channels = in_channels if cat_all else depth_channels
+
+        self.depth_down_layer0 = ConvBnLeakyRelu(in_channels, 32, 3, 1, 1, 1, 1,
                                                  has_bn=True, leaky_alpha=0.3,
                                                  has_leaky_relu=True, inplace=True, has_bias=True)
         self.depth_down_layer1 = ConvBnLeakyRelu(32, 64, 3, 1, 1, 1, 1,
@@ -44,7 +47,7 @@ class UNet(nn.Module):
         self.depth_up_layer3 = RefineResidual(32 * 2, 32, relu_layer='LeakyReLU',
                                               has_bias=True, has_relu=True, leaky_alpha=0.3)
 
-        self.refine_layer0 = ConvBnLeakyRelu(32 + all_channels, 16, 3, 1, 1, 1, 1,
+        self.refine_layer0 = ConvBnLeakyRelu(32 + out_channels, 16, 3, 1, 1, 1, 1,
                                              has_bn=True, leaky_alpha=0.3,
                                              has_leaky_relu=True, inplace=True, has_bias=True)
         self.refine_layer1 = ConvBnLeakyRelu(16, 10, 3, 1, 1, 1, 1,
@@ -91,7 +94,7 @@ class UNet(nn.Module):
         m = self.up_scale(m1)
 
         ### Residual ###
-        r = torch.cat((m0, m), 1)
+        r = torch.cat((m0, m), 1) if self.cat_all else torch.cat((x, m), 1)
         r = self.refine_layer0(r)
         r = self.refine_layer1(r)
         r = self.output_layer(r)

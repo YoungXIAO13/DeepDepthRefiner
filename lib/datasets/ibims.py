@@ -27,11 +27,12 @@ class Ibims(data.Dataset):
         return len(self.im_names)
 
     def __getitem__(self, index):
-        depth_gt, depth_pred, label, edge = self._fetch_data(index)
+        depth_gt, depth_pred, label, edge, normal = self._fetch_data(index)
 
         depth_gt = torch.from_numpy(np.ascontiguousarray(depth_gt)).float().unsqueeze(0)
         depth_pred = torch.from_numpy(np.ascontiguousarray(depth_pred)).float().unsqueeze(0)
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
+        normal = torch.from_numpy(np.ascontiguousarray(normal)).float().permute(2, 0, 1)
 
         # fetch image if called
         if self.use_im:
@@ -41,7 +42,7 @@ class Ibims(data.Dataset):
         else:
             im = torch.as_tensor(0)
 
-        return depth_gt, depth_pred, label, edge, im
+        return depth_gt, depth_pred, label, edge, normal, im
 
     def _fetch_data(self, index):
         # fetch depth map in meters
@@ -58,7 +59,12 @@ class Ibims(data.Dataset):
         contour[mask] = 1
         label[:, :, 0] = contour
 
-        return depth_gt, depth_pred, label, edge
+        # fetch normal map
+        normal_path = join(self.root_dir, 'normal', '{}-normal.png'.format(self.im_names[index]))
+        normal = cv2.imread(normal_path, -1) / (2 ** 16 - 1) * 2 - 1
+        normal = normal[:, :, ::-1]
+
+        return depth_gt, depth_pred, label, edge, normal
 
     def _load_depths_from_mat(self, gt_mat, pred_mat):
         # load prediction depth
@@ -102,5 +108,5 @@ if __name__ == "__main__":
         data = data
         print(time.time() - begin)
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape, data[5].shape)
             sys.exit()

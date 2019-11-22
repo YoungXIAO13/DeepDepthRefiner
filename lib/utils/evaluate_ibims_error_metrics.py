@@ -13,6 +13,7 @@ from scipy import ndimage
 from sklearn.decomposition import PCA
 import math
 import matplotlib.pyplot as plt
+from scipy import ndimage
 
 
 def compute_distance_related_errors(gt, pred):

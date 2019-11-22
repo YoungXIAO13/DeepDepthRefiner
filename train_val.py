@@ -19,8 +19,9 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network and loss settings
-parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
-parser.add_argument('--use_occ', type=bool, default=True, help='whether to use occlusion as network input')
+#parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_occ', action='store_true', default=True, help='whether to use occlusion as network input')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 parser.add_argument('--cat_all', action='store_true', help='whether to concatenate all maps in decoder')
 
@@ -54,8 +55,8 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method, use_im=opt.use_im)
-dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im)
+dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
+dataset_val = Ibims(opt.val_dir, opt.val_method)
 
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=opt.workers)
@@ -63,7 +64,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_im=opt.use_im, cat_all=opt.cat_all)
+net = UNet(use_occ=opt.use_occ, use_im=opt.use_normal, cat_all=opt.cat_all)
 net.apply(kaiming_init)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
@@ -103,7 +104,7 @@ def train(data_loader, net, optimizer):
             depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), im.cuda()
 
         # forward pass
-        depth_pred = net(depth_coarse, occlusion, im)
+        depth_pred = net(depth_coarse, occlusion, normal)
 
         # compute losses and update the meters
         if opt.mask:
@@ -155,11 +156,11 @@ def val(data_loader, net):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge, im = data
-            depth_gt, depth_coarse, occlusion, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), im.cuda()
+            depth_gt, depth_coarse, occlusion, edge, normal, im = data
+            depth_gt, depth_coarse, occlusion, normal, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), im.cuda()
 
             # forward pass
-            depth_pred = net(depth_coarse, occlusion, im).clamp(1e-9)
+            depth_pred = net(depth_coarse, occlusion, normal).clamp(1e-9)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()

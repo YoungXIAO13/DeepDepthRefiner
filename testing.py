@@ -20,9 +20,8 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network training procedure settings
-parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
-parser.add_argument('--use_occ', type=bool, default=True, help='whether to use occlusion as network input')
-parser.add_argument('--cat_all', action='store_true', help='whether to concatenate all maps in decoder')
+parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
@@ -42,14 +41,13 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_val = Ibims(opt.val_dir, opt.val_method, use_im=opt.use_im,
-                    label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
+dataset_val = Ibims(opt.val_dir, opt.val_method, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_im=opt.use_im, cat_all=opt.cat_all)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
 optimizer = optim.Adam(net.parameters(), lr=opt.lr, weight_decay=0.0005)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -81,11 +79,11 @@ def test(data_loader, net, result_dir):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge, im = data
-            depth_gt, depth_coarse, occlusion, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), im.cuda()
+            depth_gt, depth_coarse, occlusion, edge, normal = data
+            depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
             # forward pass
-            depth_pred = net(depth_coarse, occlusion, im).clamp(1e-9)
+            depth_pred = net(depth_coarse, occlusion, normal).clamp(1e-9)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()

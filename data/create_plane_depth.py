@@ -8,8 +8,7 @@ from tqdm import tqdm
 import itertools
 
 
-def point_to_plane(depth_path, fx=600, fy=600):
-    depth = cv2.imread(depth_path, -1)
+def point_to_plane(depth, fx=600, fy=600):
     H, W = depth.shape
     depth_plane = depth.copy()
 
@@ -23,9 +22,6 @@ def point_to_plane(depth_path, fx=600, fy=600):
 
         alpha_y = (pi - fov_y) / 2
         gamma_y = alpha_y + fov_y * ((H - i) / H)
-
-        #delta_x = depth_plane[i, j] / tan(gamma_x)
-        #delta_y = depth_plane[i, j] / tan(gamma_y)
 
         depth_plane[i, j] = np.sqrt(depth[i, j] ** 2 / (1 + 1 / (tan(gamma_x) ** 2) + 1 / (tan(gamma_y) ** 2)))
 
@@ -50,7 +46,13 @@ for index in tqdm(range(len(df))):
                               '{}{}'.format(df.iloc[index]['scene'], opt.label_name),
                               '{:04d}{}'.format(df.iloc[index]['image'], opt.depth_ext))
 
-    depth_plane = point_to_plane(depth_path)
     depth_plane_path = depth_path.replace(opt.depth_ext, opt.depth_plane_ext)
+    if os.path.exists(depth_plane_path):
+        continue
+
+    depth = cv2.imread(depth_path, -1)
+    depth_plane = point_to_plane(depth)
     cv2.imwrite(depth_plane_path, depth_plane)
+
+    assert os.path.exists(depth_plane_path)
 

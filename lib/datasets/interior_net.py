@@ -10,13 +10,12 @@ import torch.utils.data as data
 
 
 class InteriorNet(data.Dataset):
-    def __init__(self, root_dir, use_im=False, preprocess=None, label_name='_raycastingV2',
+    def __init__(self, root_dir, preprocess=None, label_name='_raycastingV2',
                  pred_dir='pred', method_name='sharpnet_pred',
                  gt_dir='data', depth_ext='-depth-plane.png', normal_ext='-normal.png', im_ext='-rgb.png',
                  label_dir='label', label_ext='-order-pix.npy'):
         super(InteriorNet, self).__init__()
         self.root_dir = root_dir
-        self.use_im = use_im
         self.preprocess = preprocess
         self.label_name = label_name
         self.method_name = method_name
@@ -43,23 +42,15 @@ class InteriorNet(data.Dataset):
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
         normal = torch.from_numpy(np.ascontiguousarray(normal)).float().permute(2, 0, 1)
 
-        # fetch image if called
-        if self.use_im:
-            im_path = join(self.root_dir, self.gt_dir,
-                           '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
-                           '{:04d}{}'.format(self.df.iloc[index]['image'], self.im_ext))
-            im = cv2.imread(im_path, -1)
-            im = torch.from_numpy(np.ascontiguousarray(im)).float().permute(2, 0, 1) / 255
-        else:
-            im = torch.as_tensor(0)
-
-        return depth_gt, depth_pred, label, normal, im
+        return depth_gt, depth_pred, label, normal
 
     def _fetch_data(self, index):
         # fetch depth map in meters
         depth_gt_path = join(self.root_dir, self.gt_dir, 
                              '{}{}'.format(self.df.iloc[index]['scene'], self.label_name),
                              '{:04d}{}'.format(self.df.iloc[index]['image'], self.depth_ext))
+        if not os.path.exists(depth_gt_path):
+            print(depth_gt_path)
         depth_gt = cv2.imread(depth_gt_path, -1) / 1000
 
         # fetch normal map in norm-1 vectors
@@ -86,7 +77,7 @@ class InteriorNet(data.Dataset):
 
 if __name__ == "__main__":
     root_dir = '/space_sdd/InteriorNet'
-    dataset = InteriorNet(root_dir, use_im=True)
+    dataset = InteriorNet(root_dir)
     print(len(dataset))
 
     from tqdm import tqdm
@@ -96,5 +87,5 @@ if __name__ == "__main__":
 
     for i, data in tqdm(enumerate(test_loader)):
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
             sys.exit()

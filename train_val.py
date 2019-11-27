@@ -19,11 +19,10 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network and loss settings
-#parser.add_argument('--use_im', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
-parser.add_argument('--use_occ', action='store_true', default=True, help='whether to use occlusion as network input')
+parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
+parser.add_argument('--use_abs', action='store_true', help='whether to use abs diff in occlusion loss func')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
-parser.add_argument('--cat_all', action='store_true', help='whether to concatenate all maps in decoder')
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
@@ -64,7 +63,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_im=opt.use_normal, cat_all=opt.cat_all)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
 net.apply(kaiming_init)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
@@ -99,12 +98,13 @@ def train(data_loader, net, optimizer):
     end = time.time()
     for i, data in enumerate(data_loader):
         # load data and label
-        depth_gt, depth_coarse, occlusion, normal, im = data
-        depth_gt, depth_coarse, occlusion, normal, im = \
-            depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), im.cuda()
+        depth_gt, depth_coarse, occlusion, normal = data
+        depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
         # forward pass
-        depth_pred = net(depth_coarse, occlusion, normal)
+        normal_clone = normal.clone()
+        occlusion_clone = occlusion.clone()
+        depth_pred = net(depth_coarse, occlusion_clone, normal_clone)
 
         # compute losses and update the meters
         if opt.mask:
@@ -114,7 +114,7 @@ def train(data_loader, net, optimizer):
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
 
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1, use_abs=opt.use_abs)
         loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
         optimizer.zero_grad()
         loss.backward()
@@ -156,8 +156,8 @@ def val(data_loader, net):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge, normal, im = data
-            depth_gt, depth_coarse, occlusion, normal, im = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), im.cuda()
+            depth_gt, depth_coarse, occlusion, edge, normal = data
+            depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
             # forward pass
             depth_pred = net(depth_coarse, occlusion, normal).clamp(1e-9)

@@ -188,7 +188,7 @@ def neighbor_depth_variation_tangent(depth, normal, diagonal=np.sqrt(2)):
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
 
-def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=np.sqrt(2)):
+def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=np.sqrt(2), use_abs=True):
     """
     Compute a distance between depth maps using the occlusion orientation
     :param depth_pred: (B, 1, H, W)
@@ -211,13 +211,29 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=n
     # get masks in (B, 8, H-2, W-2)
     orientation = occlusion[:, 1:, 1:-1, 1:-1]
 
-    # compute the loss for the four situations
-    fn_mask = ((orientation != 0) * (depth_var_point.abs() < th)).float()
-    fp_mask = ((orientation == 0) * (depth_var_geo.abs() > th)).float()
+    # compute the loss for different cases
     th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
-    fn_loss = berhu_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0])
-    fp_loss = berhu_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0])
 
-    loss_avg = fn_loss + fp_loss
+    if use_abs:
+        fn_mask = ((orientation != 0) * (depth_var_point.abs() < th)).float()
+        fp_mask = ((orientation == 0) * (depth_var_geo.abs() > th)).float()
+        fn_loss = berhu_loss(depth_var_point.abs()[fn_mask != 0], th_tensor[fn_mask != 0])
+        fp_loss = berhu_loss(depth_var_geo.abs()[fp_mask != 0], th_tensor[fp_mask != 0])
+
+        loss_avg = fn_loss + fp_loss
+
+    else:
+        fn_fg_mask = ((orientation == 1) * (depth_var_point > -th)).float()
+        fn_bg_mask = ((orientation == -1) * (depth_var_point < th)).float()
+        fp_fg_mask = ((orientation != 1) * (depth_var_point < -th) * (depth_var_tangent < -th)).float()
+        fp_bg_mask = ((orientation != -1) * (depth_var_point > th) * (depth_var_tangent > th)).float()
+
+        fn_fg_loss = berhu_loss(depth_var_point[fn_fg_mask != 0], -th_tensor[fn_fg_mask != 0])
+        fn_bg_loss = berhu_loss(depth_var_point[fn_bg_mask != 0], th_tensor[fn_fg_mask != 0])
+        fp_fg_loss = berhu_loss(depth_var_tangent[fp_fg_mask != 0], -th_tensor[fn_fg_mask != 0])
+        fp_bg_loss = berhu_loss(depth_var_tangent[fp_bg_mask != 0], th_tensor[fn_fg_mask != 0])
+
+        loss_avg = fn_fg_loss + fn_bg_loss + fp_fg_loss + fp_bg_loss
+
     return loss_avg
 

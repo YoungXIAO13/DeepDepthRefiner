@@ -3,9 +3,9 @@ import torch
 from .basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
 
 
-class UNet(nn.Module):
+class FNet(nn.Module):
     def __init__(self, depth_channels=1, occ_channels=9, normal_channels=3, use_occ=True, use_normal=False):
-        super(UNet, self).__init__()
+        super(FNet, self).__init__()
         self.use_normal = use_normal
         self.use_occ = use_occ
 
@@ -18,7 +18,6 @@ class UNet(nn.Module):
         if use_normal:
             in_channels += normal_channels
 
-        # Encoder
         self.depth_down_layer0 = ConvBnLeakyRelu(in_channels, 32, 3, 1, 1, 1, 1,
                                                  has_bn=True, leaky_alpha=0.3,
                                                  has_leaky_relu=True, inplace=True, has_bias=True)
@@ -31,11 +30,11 @@ class UNet(nn.Module):
         self.depth_down_layer3 = ConvBnLeakyRelu(128, 256, 3, 1, 1, 1, 1,
                                                  has_bn=True, leaky_alpha=0.3,
                                                  has_leaky_relu=True, inplace=True, has_bias=True)
+
         self.depth_down_layer4 = ConvBnLeakyRelu(256, 256, 3, 1, 1, 1, 1,
                                                  has_bn=True, leaky_alpha=0.3,
                                                  has_leaky_relu=True, inplace=True, has_bias=True)
 
-        # Decoder
         self.depth_up_layer0 = RefineResidual(256 * 2, 128, relu_layer='LeakyReLU',
                                               has_bias=True, has_relu=True, leaky_alpha=0.3)
         self.depth_up_layer1 = RefineResidual(128 * 2, 64, relu_layer='LeakyReLU',
@@ -45,7 +44,6 @@ class UNet(nn.Module):
         self.depth_up_layer3 = RefineResidual(32 * 2, 32, relu_layer='LeakyReLU',
                                               has_bias=True, has_relu=True, leaky_alpha=0.3)
 
-        # Refiner
         self.refine_layer0 = ConvBnLeakyRelu(32 + in_channels, 16, 3, 1, 1, 1, 1,
                                              has_bn=True, leaky_alpha=0.3,
                                              has_leaky_relu=True, inplace=True, has_bias=True)
@@ -103,7 +101,7 @@ class UNet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = UNet(use_occ=True, use_normal=True)
+    model = UNet(use_occ=False, use_normal=False)
 
     depth = torch.rand((4, 1, 480, 640))
     occ = torch.rand((4, 9, 480, 640))

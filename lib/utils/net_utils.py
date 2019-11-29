@@ -204,6 +204,8 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=n
     # get neighborhood depth variation in (B, 8, H-2, W-2)
     depth_point_norm = depth_point.norm(dim=1, keepdim=True)
     depth_var_point = neighbor_depth_variation(depth_point_norm, diagonal)
+
+    # get corrected neighborhood depth variation in (B, 8, H-2, W-2)
     depth_var_tangent = neighbor_depth_variation_tangent(depth_point, normal, diagonal)
     depth_var_min = torch.min(depth_var_tangent, depth_var_point)
     depth_var_geo = torch.where(depth_var_tangent > 0, depth_var_min, depth_var_point)
@@ -225,13 +227,13 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=n
     else:
         fn_fg_mask = ((orientation == 1) * (depth_var_point > -th)).float()
         fn_bg_mask = ((orientation == -1) * (depth_var_point < th)).float()
-        fp_fg_mask = ((orientation != 1) * (depth_var_point < -th) * (depth_var_tangent < -th)).float()
-        fp_bg_mask = ((orientation != -1) * (depth_var_point > th) * (depth_var_tangent > th)).float()
+        fp_fg_mask = ((orientation != 1) * (depth_var_point < -th) * (depth_var_geo < -th)).float()
+        fp_bg_mask = ((orientation != -1) * (depth_var_point > th) * (depth_var_geo > th)).float()
 
         fn_fg_loss = berhu_loss(depth_var_point[fn_fg_mask != 0], -th_tensor[fn_fg_mask != 0])
-        fn_bg_loss = berhu_loss(depth_var_point[fn_bg_mask != 0], th_tensor[fn_fg_mask != 0])
-        fp_fg_loss = berhu_loss(depth_var_tangent[fp_fg_mask != 0], -th_tensor[fn_fg_mask != 0])
-        fp_bg_loss = berhu_loss(depth_var_tangent[fp_bg_mask != 0], th_tensor[fn_fg_mask != 0])
+        fn_bg_loss = berhu_loss(depth_var_point[fn_bg_mask != 0], th_tensor[fn_bg_mask != 0])
+        fp_fg_loss = berhu_loss(depth_var_geo[fp_fg_mask != 0], -th_tensor[fp_fg_mask != 0])
+        fp_bg_loss = berhu_loss(depth_var_geo[fp_bg_mask != 0], th_tensor[fp_bg_mask != 0])
 
         loss_avg = fn_fg_loss + fn_bg_loss + fp_fg_loss + fp_bg_loss
 

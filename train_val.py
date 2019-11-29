@@ -47,6 +47,8 @@ parser.add_argument('--train_dir', type=str, default='/space_sdd/InteriorNet', h
 parser.add_argument('--train_method', type=str, default='sharpnet_pred')
 parser.add_argument('--val_dir', type=str, default='/space_sdd/ibims', help='testing dataset')
 parser.add_argument('--val_method', type=str, default='sharpnet')
+parser.add_argument('--val_label_dir', type=str, default='label')
+parser.add_argument('--val_label_ext', type=str, default='-order-pix.npy')
 
 opt = parser.parse_args()
 print(opt)
@@ -55,7 +57,7 @@ print(opt)
 
 # =================CREATE DATASET=========================== #
 dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
-dataset_val = Ibims(opt.val_dir, opt.val_method)
+dataset_val = Ibims(opt.val_dir, opt.val_method, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=opt.workers)
@@ -102,9 +104,9 @@ def train(data_loader, net, optimizer):
         depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
         # forward pass
-        normal_clone = normal.clone()
-        occlusion_clone = occlusion.clone()
-        depth_pred = net(depth_coarse, occlusion_clone, normal_clone)
+        # normal_clone = normal.clone()
+        # occlusion_clone = occlusion.clone()
+        depth_pred = net(depth_coarse, occlusion, normal)
 
         # compute losses and update the meters
         if opt.mask:

@@ -32,7 +32,7 @@ parser.add_argument('--result_dir', type=str, default='result', help='result fol
 # dataset settings
 parser.add_argument('--val_dir', type=str, default='/space_sdd/ibims', help='testing dataset')
 parser.add_argument('--val_method', type=str, default='junli')
-parser.add_argument('--val_label_dir', type=str, default='contour_pred_190801')
+parser.add_argument('--val_label_dir', type=str, default='contour_pred_connectivity8')
 parser.add_argument('--val_label_ext', type=str, default='-rgb-order-pix.npy')
 
 opt = parser.parse_args()

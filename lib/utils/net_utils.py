@@ -111,10 +111,10 @@ def spatial_gradient_loss(pred, target, mask):
 
     sobel_y = sobel_y.view((1, 1, 3, 3)).type_as(pred)
 
-    pred_log = (pred * mask).clamp(1e-7).log()
-    target_log = (target * mask).clamp(1e-7).log()
+    pred_log = pred.clamp(1e-7).log()
+    target_log = target.clamp(1e-7).log()
 
-    diff = pred_log - target_log
+    diff = (pred_log - target_log) * mask
 
     gx_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_x, padding=1)
     gy_diff = F.conv2d(diff, (1.0 / 8.0) * sobel_y, padding=1)
@@ -227,8 +227,8 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=n
     else:
         fn_fg_mask = ((orientation == 1) * (depth_var_point > -th)).float()
         fn_bg_mask = ((orientation == -1) * (depth_var_point < th)).float()
-        fp_fg_mask = ((orientation != 1) * (depth_var_point < -th) * (depth_var_geo < -th)).float()
-        fp_bg_mask = ((orientation != -1) * (depth_var_point > th) * (depth_var_geo > th)).float()
+        fp_fg_mask = ((orientation != 1) * (depth_var_geo < -th)).float()
+        fp_bg_mask = ((orientation != -1) * (depth_var_geo > th)).float()
 
         fn_fg_loss = berhu_loss(depth_var_point[fn_fg_mask != 0], -th_tensor[fn_fg_mask != 0])
         fn_bg_loss = berhu_loss(depth_var_point[fn_bg_mask != 0], th_tensor[fn_bg_mask != 0])

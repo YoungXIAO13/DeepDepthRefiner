@@ -63,7 +63,7 @@ def compute_global_errors(gt, pred):
     # rmse_log = (np.log(gt) - np.log(pred)) ** 2
     # rmse_log = np.sqrt(rmse_log.mean())
 
-    log10 = np.mean(np.abs(np.log10(gt) - np.log10(pred)))
+    log10 = np.mean(np.abs(np.log10(np.clip(gt+1e-4, a_min=1e-12, a_max=1e12)) - np.log10(np.clip(pred+1e-4, a_min=1e-12, a_max=1e12))))
 
     abs_rel = np.mean(np.abs(gt - pred) / gt)
 

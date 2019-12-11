@@ -100,13 +100,9 @@ def test(data_loader, net, result_dir):
             gt_name = os.path.join(result_dir, '{:04}_gt.png'.format(i))
             pred_name = os.path.join(result_dir, '{:04}_refine.png'.format(i))
             init_name = os.path.join(result_dir, '{:04}_init.png'.format(i))
-            pred_error_name = os.path.join(result_dir, '{:04}_refine_error.png'.format(i))
-            init_error_name = os.path.join(result_dir, '{:04}_init_error.png'.format(i))
             plt.imsave(gt_name, gt)
             plt.imsave(pred_name, pred)
             plt.imsave(init_name, init)
-            # plt.imsave(pred_error_name, gt - pred)
-            # plt.imsave(init_error_name, gt - init)
 
             gt_vec = gt.flatten()
             pred_vec = pred.flatten()

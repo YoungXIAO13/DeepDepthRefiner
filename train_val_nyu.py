@@ -7,13 +7,15 @@ import os
 import time
 
 from lib.models.unet import UNet
-from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
 
 from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
     berhu_loss, spatial_gradient_loss, occlusion_aware_loss, create_gamma_matrix
 from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
     compute_depth_boundary_error, compute_directed_depth_error
+from lib.utils.data_utils import read_jiao, read_bts, read_dorn, read_eigen, read_laina, read_sharpnet, read_vnl, \
+    padding_occlusion
+
 
 # =================PARAMETERS=============================== #
 parser = argparse.ArgumentParser()
@@ -21,6 +23,7 @@ parser = argparse.ArgumentParser()
 # network and loss settings
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
+parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--use_abs', action='store_true', help='whether to use abs diff in occlusion loss func')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 
@@ -32,7 +35,7 @@ parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance'
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 parser.add_argument('--step', type=int, default=50, help='epoch to decrease')
 parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
 parser.add_argument('--epoch', type=int, default=100, help='number of epochs to train for')
 parser.add_argument('--print_freq', type=int, default=50, help='frequence of output print')
 
@@ -45,10 +48,11 @@ parser.add_argument('--save_dir', type=str, default='model', help='save model pa
 # dataset settings
 parser.add_argument('--train_dir', type=str, default='/space_sdd/InteriorNet', help='training dataset')
 parser.add_argument('--train_method', type=str, default='sharpnet_pred')
-parser.add_argument('--val_dir', type=str, default='/space_sdd/ibims', help='testing dataset')
-parser.add_argument('--val_method', type=str, default='sharpnet')
-parser.add_argument('--val_label_dir', type=str, default='label')
-parser.add_argument('--val_label_ext', type=str, default='-order-pix.npy')
+
+parser.add_argument('--pred_method', type=str, default='jiao')
+parser.add_argument('--gt_depth', type=str, default='/space_sdd/NYU/nyuv2_depth.npy')
+parser.add_argument('--gt_boundary', type=str, default='/space_sdd/NYU/nyuv2_boundary.npy')
+parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred_padding')
 
 opt = parser.parse_args()
 print(opt)
@@ -57,15 +61,28 @@ print(opt)
 
 # =================CREATE DATASET=========================== #
 dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
-dataset_val = Ibims(opt.val_dir, opt.val_method, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
-
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
-val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=opt.workers)
+
+# define crop size for NYUv2
+eigen_crop = [21, 461, 25, 617]
+
+# load in depth prediction on validation dataset
+func = eval('read_{}'.format(opt.pred_method))
+pred_depths = func()
+pred_depths = torch.from_numpy(np.ascontiguousarray(pred_depths)).float().unsqueeze(1)
+
+# load gt depth and gt boundaries of validation dataset
+gt_depths = np.load(opt.gt_depth)
+gt_boundaries = np.load(opt.gt_boundary)
+
+# load in occlusion list
+occ_list = sorted(os.listdir(opt.occ_dir))
+assert len(occ_list) == pred_depths.shape[0], 'depth map and occlusion map does not match !'
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 net.apply(kaiming_init)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
@@ -83,14 +100,14 @@ gamma = torch.from_numpy(gamma).float().cuda()
 
 
 # =============DEFINE stuff for logs ======================= #
-result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_{}'.format(opt.session))
+result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_nyu_{}'.format(opt.session))
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')
 with open(logname, 'a') as f:
     f.write(str(opt) + '\n')
     f.write('training set: ' + str(len(dataset_train)) + '\n')
-    f.write('validation set: ' + str(len(dataset_val)) + '\n\n')
+    f.write('validation set: ' + str(len(occ_list)) + '\n\n')
 # ========================================================== #
 
 
@@ -104,7 +121,7 @@ def train(data_loader, net, optimizer):
         depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
         # forward pass
-        depth_pred = net(depth_coarse, occlusion, normal)
+        depth_pred, residual = net(depth_coarse, occlusion, normal)
 
         # compute losses and update the meters
         if opt.mask:
@@ -113,26 +130,26 @@ def train(data_loader, net, optimizer):
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
         # penalize on delta value
-        #loss_depth_gt = berhu_loss(depth_pred, depth_coarse)
-        #loss_depth_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
+        zeros = torch.zeros_like(residual).type_as(residual)
+        loss_depth_gt = berhu_loss(residual, zeros)
+        #loss_depth_gt = berhu_loss(depth_pred, depth_gt)
 
-        loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1, use_abs=opt.use_abs)
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 30. / 1000, 1, use_abs=opt.use_abs)
         loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
 
+        # optimization step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # measure bacth time
+        # measure batch time
         batch_time = time.time() - end
         end = time.time()
 
         if i % opt.print_freq == 0:
             print("\tEpoch {} --- Iter [{}/{}] Train loss: {:.3f} + {:.3f} + {:.3f} || Batch time: {:.3f}".format(
-                  epoch, i + 1, len(data_loader), 
+                  epoch, i + 1, len(data_loader),
                   opt.alpha_depth * loss_depth_gt.item(),
                   opt.alpha_grad * loss_depth_grad.item(),
                   opt.alpha_occ * loss_depth_occ.item(), batch_time))
@@ -140,9 +157,9 @@ def train(data_loader, net, optimizer):
 
 
 # ===================== DEFINE VAL ========================= #
-def val(data_loader, net):
+def val(net):
     # Initialize global and geometric errors ...
-    num_samples = len(data_loader)
+    num_samples = len(occ_list)
     rms     = np.zeros(num_samples, np.float32)
     log10   = np.zeros(num_samples, np.float32)
     abs_rel = np.zeros(num_samples, np.float32)
@@ -160,23 +177,23 @@ def val(data_loader, net):
 
     net.eval()
     with torch.no_grad():
-        for i, data in enumerate(data_loader):
-            # load data and label
-            depth_gt, depth_coarse, occlusion, edge, normal = data
-            depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+        for i in range(len(occ_list)):
+            depth_coarse = pred_depths[i].unsqueeze(0).cuda()
 
-            # forward pass
-            depth_pred = net(depth_coarse, occlusion, normal)
+            occlusion = np.load(os.path.join(opt.occ_dir, occ_list[i]))
 
-            # mask out invalid depth values
-            valid_mask = (depth_gt != 0).float()
-            gt_valid = depth_gt * valid_mask
-            pred_valid = depth_pred.clamp(1e-9) * valid_mask
+            occlusion = padding_occlusion(occlusion)
+            occlusion = occlusion.unsqueeze(0).cuda()
+
+            normal = None
+
+            pred, _ = net(depth_coarse, occlusion, normal)
+            pred = pred.clamp(1e-9)
 
             # get numpy array from torch tensor
-            gt = gt_valid.squeeze().cpu().numpy()
-            pred = pred_valid.squeeze().cpu().numpy()
-            edge = edge.numpy()
+            gt = gt_depths[i, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
+            edge = gt_boundaries[i, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
+            pred = pred.squeeze().cpu().numpy()[eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
 
             gt_vec = gt.flatten()
             pred_vec = pred.flatten()
@@ -190,34 +207,17 @@ def val(data_loader, net):
 
 
 # =============BEGIN OF THE LEARNING LOOP=================== #
-# initialization
-abs_rel, sq_rel, rms, log10, thr1, thr2, thr3, dbe_acc, dbe_com, dde_0, dde_m, dde_p = val(val_loader, net)
-print('############ Global Error Metrics #################')
-print('rel    = ',  np.nanmean(abs_rel))
-print('log10  = ',  np.nanmean(log10))
-print('rms    = ',  np.nanmean(rms))
-print('thr1   = ',  np.nanmean(thr1))
-print('thr2   = ',  np.nanmean(thr2))
-print('thr3   = ',  np.nanmean(thr3))
-print('############ Depth Boundary Error Metrics #################')
-print('dbe_acc = ',  np.nanmean(dbe_acc))
-print('dbe_com = ',  np.nanmean(dbe_com))
-print('############ Directed Depth Error Metrics #################')
-print('dde_0  = ',  np.nanmean(dde_0)*100.)
-print('dde_m  = ',  np.nanmean(dde_m)*100.)
-print('dde_p  = ',  np.nanmean(dde_p)*100.)
-
-best_rms = np.nanmean(rms)
+best_rms = np.inf
 
 for epoch in range(start_epoch, opt.epoch):
     # update learning rate
     lrScheduler.step(epoch=epoch)
 
     # train
-    train(train_loader, net, optimizer)    
+    train(train_loader, net, optimizer)
 
     # valuate
-    abs_rel, sq_rel, rms, log10, thr1, thr2, thr3, dbe_acc, dbe_com, dde_0, dde_m, dde_p = val(val_loader, net)
+    abs_rel, sq_rel, rms, log10, thr1, thr2, thr3, dbe_acc, dbe_com, dde_0, dde_m, dde_p = val(net)
 
     # log testing reults
     with open(logname, 'a') as f:

@@ -4,10 +4,12 @@ from .basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
 
 
 class UNet(nn.Module):
-    def __init__(self, depth_channels=1, occ_channels=9, normal_channels=3, use_occ=True, use_normal=False):
+    def __init__(self, depth_channels=1, occ_channels=9, normal_channels=3,
+                 use_occ=True, use_normal=False, no_contour=False):
         super(UNet, self).__init__()
         self.use_normal = use_normal
         self.use_occ = use_occ
+        self.no_contour = no_contour
 
         self.down_scale = nn.MaxPool2d(2)
         self.up_scale = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
@@ -15,6 +17,8 @@ class UNet(nn.Module):
         in_channels = depth_channels
         if use_occ:
             in_channels += occ_channels
+            if no_contour:
+                in_channels -= 1
         if use_normal:
             in_channels += normal_channels
 
@@ -60,7 +64,7 @@ class UNet(nn.Module):
     def forward(self, x, occ, normal):
         m0 = x
         if self.use_occ:
-            m0 = torch.cat((m0, occ), 1)
+            m0 = torch.cat((m0, occ[:, 1:, :, :]), 1) if self.no_contour else torch.cat((m0, occ), 1)
         if self.use_normal:
             m0 = torch.cat((m0, normal), 1)
 
@@ -103,7 +107,7 @@ class UNet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = UNet(use_occ=True, use_normal=True)
+    model = UNet(use_occ=False, use_normal=True)
 
     depth = torch.rand((4, 1, 480, 640))
     occ = torch.rand((4, 9, 480, 640))

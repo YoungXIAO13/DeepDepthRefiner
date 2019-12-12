@@ -10,7 +10,7 @@ from lib.models.unet import UNet
 from lib.datasets.ibims import Ibims
 from lib.datasets.interior_net import InteriorNet
 
-from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
+from lib.utils.net_utils import kaiming_init, weights_normal_init, save_checkpoint, load_checkpoint, \
     berhu_loss, spatial_gradient_loss, occlusion_aware_loss, create_gamma_matrix
 from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
     compute_depth_boundary_error, compute_directed_depth_error
@@ -22,6 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--use_abs', action='store_true', help='whether to use abs diff in occlusion loss func')
+parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
@@ -65,8 +66,9 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 net.apply(kaiming_init)
+weights_normal_init(net.output_layer, 0.01)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 lrScheduler = optim.lr_scheduler.MultiStepLR(optimizer, [opt.step], gamma=0.1)
@@ -83,7 +85,7 @@ gamma = torch.from_numpy(gamma).float().cuda()
 
 
 # =============DEFINE stuff for logs ======================= #
-result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_{}'.format(opt.session))
+result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_ibimis_{}'.format(opt.session))
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')

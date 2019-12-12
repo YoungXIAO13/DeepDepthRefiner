@@ -6,7 +6,7 @@ from math import atan, tan, pi
 import itertools
 
 
-def weights_normal_init(model, dev=0.01):
+def weights_normal_init(model, dev=0.001):
     if isinstance(model, list):
         for m in model:
             weights_normal_init(m, dev)

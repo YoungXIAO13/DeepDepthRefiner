@@ -48,7 +48,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
 net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
-optimizer = optim.Adam(net.parameters(), lr=opt.lr, weight_decay=0.0005)
+optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
 

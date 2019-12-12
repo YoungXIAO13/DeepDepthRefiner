@@ -9,7 +9,7 @@ import time
 from lib.models.unet import UNet
 from lib.datasets.interior_net import InteriorNet
 
-from lib.utils.net_utils import kaiming_init, save_checkpoint, load_checkpoint, \
+from lib.utils.net_utils import kaiming_init, weights_normal_init, save_checkpoint, load_checkpoint, \
     berhu_loss, spatial_gradient_loss, occlusion_aware_loss, create_gamma_matrix
 from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
     compute_depth_boundary_error, compute_directed_depth_error
@@ -84,6 +84,7 @@ assert len(occ_list) == pred_depths.shape[0], 'depth map and occlusion map does 
 # ================CREATE NETWORK AND OPTIMIZER============== #
 net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 net.apply(kaiming_init)
+weights_normal_init(net.output_layer, 0.01)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 lrScheduler = optim.lr_scheduler.MultiStepLR(optimizer, [opt.step], gamma=0.1)
@@ -121,7 +122,7 @@ def train(data_loader, net, optimizer):
         depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
 
         # forward pass
-        depth_pred, residual = net(depth_coarse, occlusion, normal)
+        depth_pred = net(depth_coarse, occlusion, normal)
 
         # compute losses and update the meters
         if opt.mask:
@@ -130,12 +131,12 @@ def train(data_loader, net, optimizer):
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
         # penalize on delta value
-        zeros = torch.zeros_like(residual).type_as(residual)
-        loss_depth_gt = berhu_loss(residual, zeros)
-        #loss_depth_gt = berhu_loss(depth_pred, depth_gt)
+        #loss_depth_gt = berhu_loss(residual, zeros)
 
+        loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 30. / 1000, 1, use_abs=opt.use_abs)
+
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1, use_abs=opt.use_abs)
         loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
 
         # optimization step
@@ -187,7 +188,7 @@ def val(net):
 
             normal = None
 
-            pred, _ = net(depth_coarse, occlusion, normal)
+            pred = net(depth_coarse, occlusion, normal)
             pred = pred.clamp(1e-9)
 
             # get numpy array from torch tensor

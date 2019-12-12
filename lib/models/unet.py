@@ -58,8 +58,7 @@ class UNet(nn.Module):
                                              has_leaky_relu=True, inplace=True, has_bias=True)
 
         self.output_layer = ConvBnRelu(10, 1, 3, 1, 1, 1, 1,
-                                       has_bn=False,
-                                       has_relu=False, inplace=True, has_bias=True)
+                                       has_bn=False, has_relu=False, inplace=True, has_bias=False)
 
     def forward(self, x, occ, normal):
         m0 = x

@@ -30,7 +30,7 @@ parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of o
 # pth settings
 parser.add_argument('--checkpoint', type=str, default=None, help='optional reload model path')
 
-parser.add_argument('--result_dir', type=str, default='/space_sdd/NYU/depth_refine/session_31')
+parser.add_argument('--result_dir', type=str, default='/space_sdd/NYU/depth_refine/session_36')
 parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred_padding')
 
 opt = parser.parse_args()
@@ -124,7 +124,7 @@ def read_vnl():
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
 net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
-optimizer = optim.Adam(net.parameters(), lr=opt.lr, weight_decay=0.0005)
+optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
 net.cuda()

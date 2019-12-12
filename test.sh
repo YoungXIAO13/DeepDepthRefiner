@@ -1,9 +1,9 @@
 
-python testing.py \
---checkpoint model/session_31/checkpoint_18_1.14.pth \
+python -W ignore testing.py \
+--checkpoint model/session_36/checkpoint_2_1.06.pth \
 --val_method sharpnet \
 --use_occ \
---val_label_dir contour_pred_190801
+--val_label_dir contour_pred_connectivity8
 
 #--val_label_dir contour_pred_190801
 #--val_label_dir contour_pred_connectivity8

@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import os
+from tqdm import tqdm
 
 import matplotlib
 matplotlib.use('agg')  # use matplotlib without GUI support
@@ -22,6 +23,8 @@ parser = argparse.ArgumentParser()
 # network training procedure settings
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
+parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
+parser.add_argument('--th', type=float, default=None)
 
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
@@ -41,13 +44,13 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_val = Ibims(opt.val_dir, opt.val_method, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
+dataset_val = Ibims(opt.val_dir, opt.val_method, th=opt.th, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -77,7 +80,7 @@ def test(data_loader, net, result_dir):
 
     net.eval()
     with torch.no_grad():
-        for i, data in enumerate(data_loader):
+        for i, data in enumerate(tqdm(data_loader)):
             # load data and label
             depth_gt, depth_coarse, occlusion, edge, normal = data
             depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()

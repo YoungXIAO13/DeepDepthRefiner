@@ -25,16 +25,20 @@ parser = argparse.ArgumentParser()
 # network settings
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
+parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
+parser.add_argument('--th', type=float, default=0.5)
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
 # pth settings
 parser.add_argument('--checkpoint', type=str, default=None, help='optional reload model path')
 
-parser.add_argument('--result_dir', type=str, default='/space_sdd/NYU/depth_refine/session_36')
-parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred_padding')
+parser.add_argument('--result_dir', type=str, default='/space_sdd/NYU/depth_refine')
+parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred')
 
 opt = parser.parse_args()
 print(opt)
+
+result_dir = os.path.join(opt.result_dir, opt.checkpoint.split('/')[-2] + '_th={}'.format(opt.th))
 # ========================================================== #
 
 
@@ -123,7 +127,7 @@ def read_vnl():
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal)
+net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -142,10 +146,14 @@ for method in tqdm(['jiao', 'laina', 'sharpnet', 'eigen', 'dorn', 'bts', 'vnl'])
     assert len(occ_list) == depths.shape[0], 'depth map and occlusion map does not match !'
 
     with torch.no_grad():
-        for i in tqdm(range(len(occ_list))):
+        for i in tqdm(range(len(occ_list)), desc='refining depth prediction from {}'.format(method)):
             depth_coarse = depths[i].unsqueeze(0).cuda()
 
             occlusion = np.load(os.path.join(opt.occ_dir, occ_list[i]))
+
+            # remove predictions with small score
+            mask = occlusion[:, :, 0] <= opt.th
+            occlusion[mask, 1:] = 0
 
             occlusion = padding_occlusion(occlusion)
             occlusion = occlusion.unsqueeze(0).cuda()
@@ -156,9 +164,9 @@ for method in tqdm(['jiao', 'laina', 'sharpnet', 'eigen', 'dorn', 'bts', 'vnl'])
             depth_init = depth_coarse.squeeze().cpu().numpy()
 
             img_name = occ_list[i].split('-')[0]
-            refine_name = os.path.join(opt.result_dir, method, 'depth_refine', '{}.png'.format(img_name))
-            init_name = os.path.join(opt.result_dir, method, 'depth_init', '{}.png'.format(img_name))
-            save_name = os.path.join(opt.result_dir, method, 'depth_npy', '{}.npy'.format(img_name))
+            refine_name = os.path.join(result_dir, method, 'depth_refine', '{}.png'.format(img_name))
+            init_name = os.path.join(result_dir, method, 'depth_init', '{}.png'.format(img_name))
+            save_name = os.path.join(result_dir, method, 'depth_npy', '{}.npy'.format(img_name))
 
             if not os.path.isdir(os.path.dirname(refine_name)):
                 os.makedirs(os.path.dirname(refine_name))

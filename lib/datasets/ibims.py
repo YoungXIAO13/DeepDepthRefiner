@@ -9,7 +9,7 @@ import torch.utils.data as data
 
 
 class Ibims(data.Dataset):
-    def __init__(self, root_dir, method_name,
+    def __init__(self, root_dir, method_name, th=None,
                  im_dir='ibims1_core_raw/rgb', gt_dir='gt_depth', label_dir='label', label_ext='-order-pix.npy'):
         super(Ibims, self).__init__()
         self.root_dir = root_dir
@@ -18,6 +18,7 @@ class Ibims(data.Dataset):
         self.label_dir = label_dir
         self.label_ext = label_ext
         self.method_name = method_name
+        self.th = th
         with open(join(self.root_dir, 'imagelist.txt')) as f:
             image_names = f.readlines()
         self.im_names = [x.strip() for x in image_names]
@@ -45,6 +46,11 @@ class Ibims(data.Dataset):
         # fetch occlusion orientation labels
         label_path = join(self.root_dir, self.label_dir, self.im_names[index] + self.label_ext)
         label = np.load(label_path)
+
+        # remove predictions with small score
+        if self.th is not None:
+            mask = label[:, :, 0] <= self.th
+            label[mask, 1:] = 0
 
         # fetch normal map
         normal_path = join(self.root_dir, 'normal', '{}-normal.png'.format(self.im_names[index]))
@@ -83,7 +89,7 @@ class Ibims(data.Dataset):
 if __name__ == "__main__":
     root_dir = '/space_sdd/ibims'
     method_name = 'sharpnet'
-    dataset = Ibims(root_dir, method_name)
+    dataset = Ibims(root_dir, method_name, th=0.5)
     print(len(dataset))
 
     from torch.utils.data import DataLoader

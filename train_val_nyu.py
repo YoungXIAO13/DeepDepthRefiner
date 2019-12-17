@@ -24,8 +24,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
-parser.add_argument('--use_abs', action='store_true', help='whether to use abs diff in occlusion loss func')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
+parser.add_argument('--th', type=float, default=0.5)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
@@ -52,7 +52,7 @@ parser.add_argument('--train_method', type=str, default='sharpnet_pred')
 parser.add_argument('--pred_method', type=str, default='jiao')
 parser.add_argument('--gt_depth', type=str, default='/space_sdd/NYU/nyuv2_depth.npy')
 parser.add_argument('--gt_boundary', type=str, default='/space_sdd/NYU/nyuv2_boundary.npy')
-parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred_padding')
+parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred')
 
 opt = parser.parse_args()
 print(opt)
@@ -84,7 +84,7 @@ assert len(occ_list) == pred_depths.shape[0], 'depth map and occlusion map does 
 # ================CREATE NETWORK AND OPTIMIZER============== #
 net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 net.apply(kaiming_init)
-weights_normal_init(net.output_layer, 0.01)
+weights_normal_init(net.output_layer, 0.001)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 lrScheduler = optim.lr_scheduler.MultiStepLR(optimizer, [opt.step], gamma=0.1)
@@ -130,13 +130,10 @@ def train(data_loader, net, optimizer):
         else:
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
-        # penalize on delta value
-        #loss_depth_gt = berhu_loss(residual, zeros)
-
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
 
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1, use_abs=opt.use_abs)
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
         loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
 
         # optimization step
@@ -182,6 +179,10 @@ def val(net):
             depth_coarse = pred_depths[i].unsqueeze(0).cuda()
 
             occlusion = np.load(os.path.join(opt.occ_dir, occ_list[i]))
+
+            # remove predictions with small score
+            mask = occlusion[:, :, 0] <= opt.th
+            occlusion[mask, 1:] = 0
 
             occlusion = padding_occlusion(occlusion)
             occlusion = occlusion.unsqueeze(0).cuda()

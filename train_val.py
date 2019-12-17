@@ -21,9 +21,9 @@ parser = argparse.ArgumentParser()
 # network and loss settings
 parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
-parser.add_argument('--use_abs', action='store_true', help='whether to use abs diff in occlusion loss func')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
+parser.add_argument('--th', type=float, default=None)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
@@ -58,7 +58,7 @@ print(opt)
 
 # =================CREATE DATASET=========================== #
 dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
-dataset_val = Ibims(opt.val_dir, opt.val_method, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
+dataset_val = Ibims(opt.val_dir, opt.val_method, th=opt.th, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=opt.workers)
@@ -68,7 +68,7 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 # ================CREATE NETWORK AND OPTIMIZER============== #
 net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
 net.apply(kaiming_init)
-weights_normal_init(net.output_layer, 0.01)
+weights_normal_init(net.output_layer, 0.001)
 
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 lrScheduler = optim.lr_scheduler.MultiStepLR(optimizer, [opt.step], gamma=0.1)
@@ -114,14 +114,10 @@ def train(data_loader, net, optimizer):
         else:
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
-        # penalize on delta value
-        #loss_depth_gt = berhu_loss(depth_pred, depth_coarse)
-        #loss_depth_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
-
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
 
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1, use_abs=opt.use_abs)
+        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
         loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
 
         optimizer.zero_grad()
@@ -209,7 +205,7 @@ print('dde_0  = ',  np.nanmean(dde_0)*100.)
 print('dde_m  = ',  np.nanmean(dde_m)*100.)
 print('dde_p  = ',  np.nanmean(dde_p)*100.)
 
-best_rms = np.nanmean(rms)
+best_rms = np.inf
 
 for epoch in range(start_epoch, opt.epoch):
     # update learning rate

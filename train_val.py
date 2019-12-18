@@ -33,7 +33,7 @@ parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance'
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 parser.add_argument('--step', type=int, default=50, help='epoch to decrease')
 parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
 parser.add_argument('--epoch', type=int, default=100, help='number of epochs to train for')
 parser.add_argument('--print_freq', type=int, default=50, help='frequence of output print')
 

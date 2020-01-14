@@ -32,7 +32,7 @@ parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
 
 # optimization settings
-parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
+parser.add_argument('--lr', type=float, default=1e-4, help='learning rate of optimizer')
 parser.add_argument('--step', type=int, default=50, help='epoch to decrease')
 parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
@@ -40,7 +40,6 @@ parser.add_argument('--epoch', type=int, default=100, help='number of epochs to 
 parser.add_argument('--print_freq', type=int, default=50, help='frequence of output print')
 
 # pth settings
-parser.add_argument('--session', type=int, default=0, help='training session')
 parser.add_argument('--resume', action='store_true', help='resume checkpoint or not')
 parser.add_argument('--checkpoint', type=str, default=None, help='optional reload model path')
 parser.add_argument('--save_dir', type=str, default='model', help='save model path')
@@ -76,7 +75,7 @@ gt_depths = np.load(opt.gt_depth)
 gt_boundaries = np.load(opt.gt_boundary)
 
 # load in occlusion list
-occ_list = sorted(os.listdir(opt.occ_dir))
+occ_list = sorted([name for name in os.listdir(opt.occ_dir) if name.endswith(".npy")])
 assert len(occ_list) == pred_depths.shape[0], 'depth map and occlusion map does not match !'
 # ========================================================== #
 
@@ -101,7 +100,7 @@ gamma = torch.from_numpy(gamma).float().cuda()
 
 
 # =============DEFINE stuff for logs ======================= #
-result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_nyu_{}'.format(opt.session))
+result_path = os.path.join(os.getcwd(), opt.save_dir)
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')

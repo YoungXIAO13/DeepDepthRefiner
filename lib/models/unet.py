@@ -4,12 +4,13 @@ from .basic_modules import ConvBnRelu, ConvBnLeakyRelu, RefineResidual
 
 
 class UNet(nn.Module):
-    def __init__(self, depth_channels=1, occ_channels=9, normal_channels=3,
-                 use_occ=True, use_normal=False, no_contour=False):
+    def __init__(self, depth_channels=1, occ_channels=9, use_occ=True, no_contour=True, only_contour=False,
+                 aux_channels=3, use_aux=False):
         super(UNet, self).__init__()
-        self.use_normal = use_normal
+        self.use_aux = use_aux
         self.use_occ = use_occ
         self.no_contour = no_contour
+        self.only_contour = only_contour
 
         self.down_scale = nn.MaxPool2d(2)
         self.up_scale = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
@@ -19,8 +20,11 @@ class UNet(nn.Module):
             in_channels += occ_channels
             if no_contour:
                 in_channels -= 1
-        if use_normal:
-            in_channels += normal_channels
+            if only_contour:
+                in_channels -= 8
+
+        if use_aux:
+            in_channels += aux_channels
 
         # Encoder
         self.depth_down_layer0 = ConvBnLeakyRelu(in_channels, 32, 3, 1, 1, 1, 1,
@@ -60,12 +64,18 @@ class UNet(nn.Module):
         self.output_layer = ConvBnRelu(10, 1, 3, 1, 1, 1, 1,
                                        has_bn=False, has_relu=False, inplace=True, has_bias=False)
 
-    def forward(self, x, occ, normal):
+    def forward(self, x, occ, aux):
         m0 = x
         if self.use_occ:
-            m0 = torch.cat((m0, occ[:, 1:, :, :]), 1) if self.no_contour else torch.cat((m0, occ), 1)
-        if self.use_normal:
-            m0 = torch.cat((m0, normal), 1)
+            if self.no_contour:
+                m0 = torch.cat((m0, occ[:, 1:, :, :]), 1)
+            elif self.only_contour:
+                m0 = torch.cat((m0, occ.narrow(1, 0, 1)), 1)
+            else:
+                m0 = torch.cat((m0, occ), 1)
+
+        if self.use_aux:
+            m0 = torch.cat((m0, aux), 1)
 
         #### Depth ####
         conv0 = self.depth_down_layer0(m0)
@@ -106,7 +116,8 @@ class UNet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = UNet(use_occ=False, use_normal=True)
+    model = UNet(use_occ=False, no_contour=False, only_contour=True,
+                 aux_channels=3, use_aux=True)
 
     depth = torch.rand((4, 1, 480, 640))
     occ = torch.rand((4, 9, 480, 640))

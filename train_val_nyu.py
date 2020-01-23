@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import cv2
 import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
@@ -14,22 +15,26 @@ from lib.utils.net_utils import kaiming_init, weights_normal_init, save_checkpoi
 from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
     compute_depth_boundary_error, compute_directed_depth_error
 from lib.utils.data_utils import read_jiao, read_bts, read_dorn, read_eigen, read_laina, read_sharpnet, read_vnl, \
-    padding_occlusion
+    padding_array
 
 
 # =================PARAMETERS=============================== #
 parser = argparse.ArgumentParser()
 
 # network and loss settings
-parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_normal', action='store_true', help='whether to use normal map as network input')
+parser.add_argument('--use_img', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
+parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
+
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 parser.add_argument('--th', type=float, default=0.5)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
+parser.add_argument('--alpha_change', type=float, default=0., help='weight balance')
 
 # optimization settings
 parser.add_argument('--lr', type=float, default=1e-4, help='learning rate of optimizer')
@@ -52,6 +57,7 @@ parser.add_argument('--pred_method', type=str, default='jiao')
 parser.add_argument('--gt_depth', type=str, default='/space_sdd/NYU/nyuv2_depth.npy')
 parser.add_argument('--gt_boundary', type=str, default='/space_sdd/NYU/nyuv2_boundary.npy')
 parser.add_argument('--occ_dir', type=str, default='/space_sdd/NYU/nyu_order_pred')
+parser.add_argument('--data_dir', type=str, default='/home/xuchong/Projects/occ_edge_order/data/dataset_real/NYUv2/data/val_occ_order_raycasting_woNormal_avgROI_1mm')
 
 opt = parser.parse_args()
 print(opt)
@@ -76,12 +82,21 @@ gt_boundaries = np.load(opt.gt_boundary)
 
 # load in occlusion list
 occ_list = sorted([name for name in os.listdir(opt.occ_dir) if name.endswith(".npy")])
-assert len(occ_list) == pred_depths.shape[0], 'depth map and occlusion map does not match !'
+assert len(occ_list) == pred_depths.shape[0], 'depth maps and occlusion maps does not match in quantity!'
+
+# load in normal list
+normal_list = sorted([name for name in os.listdir(opt.data_dir) if name.endswith("-normal.png")])
+assert len(normal_list) == pred_depths.shape[0], 'normal maps and occlusion maps does not match in quantity!'
+
+# load in rgb list
+img_list = sorted([name for name in os.listdir(opt.data_dir) if name.endswith("-rgb.png")])
+assert len(img_list) == pred_depths.shape[0], 'rgb images and occlusion maps does not match in quantity!'
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
+net = UNet(use_occ=opt.use_occ, no_contour=opt.no_contour, only_contour=opt.only_contour,
+           use_aux=(opt.use_normal or opt.use_img))
 net.apply(kaiming_init)
 weights_normal_init(net.output_layer, 0.001)
 
@@ -117,11 +132,18 @@ def train(data_loader, net, optimizer):
     end = time.time()
     for i, data in enumerate(data_loader):
         # load data and label
-        depth_gt, depth_coarse, occlusion, normal = data
-        depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+        depth_gt, depth_coarse, occlusion, normal, img = data
+        depth_gt, depth_coarse, occlusion, normal, img = \
+            depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), img.cuda()
 
         # forward pass
-        depth_pred = net(depth_coarse, occlusion, normal)
+        if opt.use_normal:
+            aux = normal
+        elif opt.use_img:
+            aux = img
+        else:
+            aux = None
+        depth_pred = net(depth_coarse, occlusion, aux)
 
         # compute losses and update the meters
         if opt.mask:
@@ -131,9 +153,15 @@ def train(data_loader, net, optimizer):
 
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-
         loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
-        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
+
+        loss_change_depth = berhu_loss(depth_pred, depth_coarse)
+        loss_change_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
+
+        loss = opt.alpha_depth * loss_depth_gt + \
+               opt.alpha_grad * loss_depth_grad + \
+               opt.alpha_occ * loss_depth_occ + \
+               opt.alpha_change * (opt.alpha_depth * loss_change_depth + opt.alpha_grad * loss_change_grad)
 
         # optimization step
         optimizer.zero_grad()
@@ -183,12 +211,19 @@ def val(net):
             mask = occlusion[:, :, 0] <= opt.th
             occlusion[mask, 1:] = 0
 
-            occlusion = padding_occlusion(occlusion)
+            occlusion = padding_array(occlusion)
             occlusion = occlusion.unsqueeze(0).cuda()
 
-            normal = None
-
-            pred = net(depth_coarse, occlusion, normal)
+            # forward pass
+            if opt.use_normal:
+                aux = cv2.imread(os.path.join(opt.data_dir, normal_list[i]), -1) / (2 ** 16 - 1) * 2 - 1
+            elif opt.use_img:
+                aux = cv2.imread(os.path.join(opt.data_dir, img_list[i]), -1) / 255
+            else:
+                aux = None
+            if aux is not None:
+                aux = padding_array(aux).unsqueeze(0).cuda()
+            pred = net(depth_coarse, occlusion, aux)
             pred = pred.clamp(1e-9)
 
             # get numpy array from torch tensor

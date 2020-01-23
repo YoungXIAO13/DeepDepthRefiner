@@ -10,7 +10,8 @@ import torch.utils.data as data
 
 class Ibims(data.Dataset):
     def __init__(self, root_dir, method_name, th=None,
-                 im_dir='ibims1_core_raw/rgb', gt_dir='gt_depth', label_dir='label', label_ext='-order-pix.npy'):
+                 im_dir='ibims1_core_raw/rgb', gt_dir='gt_depth',
+                 label_dir='label', label_ext='-order-pix.npy'):
         super(Ibims, self).__init__()
         self.root_dir = root_dir
         self.im_dir = im_dir
@@ -27,14 +28,15 @@ class Ibims(data.Dataset):
         return len(self.im_names)
 
     def __getitem__(self, index):
-        depth_gt, depth_pred, label, edge, normal = self._fetch_data(index)
+        depth_gt, depth_pred, label, edge, normal, img = self._fetch_data(index)
 
         depth_gt = torch.from_numpy(np.ascontiguousarray(depth_gt)).float().unsqueeze(0)
         depth_pred = torch.from_numpy(np.ascontiguousarray(depth_pred)).float().unsqueeze(0)
         label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
         normal = torch.from_numpy(np.ascontiguousarray(normal)).float().permute(2, 0, 1)
+        img = torch.from_numpy(np.ascontiguousarray(img)).float().permute(2, 0, 1)
 
-        return depth_gt, depth_pred, label, edge, normal
+        return depth_gt, depth_pred, label, edge, normal, img
 
     def _fetch_data(self, index):
         # fetch depth map in meters
@@ -57,7 +59,12 @@ class Ibims(data.Dataset):
         normal = cv2.imread(normal_path, -1) / (2 ** 16 - 1) * 2 - 1
         normal = normal[:, :, ::-1]
 
-        return depth_gt, depth_pred, label, edge, normal
+        # fetch rgb image
+        img_path = join(self.root_dir, self.im_dir, '{}.png'.format(self.im_names[index]))
+        img = cv2.imread(img_path, -1) / 255
+        img = img[:, :, ::-1]
+
+        return depth_gt, depth_pred, label, edge, normal, img
 
     def _load_depths_from_mat(self, gt_mat, pred_mat):
         # load prediction depth
@@ -101,5 +108,5 @@ if __name__ == "__main__":
         data = data
         print(time.time() - begin)
         if i == 0:
-            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
+            print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape, data[5].shape)
             sys.exit()

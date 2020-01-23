@@ -70,9 +70,9 @@ def normalize_depth_map(depth):
     return pred_normalized
 
 
-def padding_occlusion(label_crop, h=480, w=640):
+def padding_array(label_crop, h=480, w=640):
     eigen_crop = [21, 461, 25, 617]
-    label = np.zeros((h, w, 9))
+    label = np.zeros((h, w, label_crop.shape[-1]))
     label[eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]] = label_crop
     label = torch.from_numpy(np.ascontiguousarray(label)).float().permute(2, 0, 1)
     return label

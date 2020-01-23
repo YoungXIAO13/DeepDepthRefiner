@@ -19,15 +19,19 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network and loss settings
-parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_normal', action='store_true', help='whether to use normal map as network input')
+parser.add_argument('--use_img', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
+parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
+
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 parser.add_argument('--th', type=float, default=None)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
+parser.add_argument('--alpha_change', type=float, default=0., help='weight balance')
 
 # optimization settings
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
@@ -66,7 +70,8 @@ val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=op
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
+net = UNet(use_occ=opt.use_occ, no_contour=opt.no_contour, only_contour=opt.only_contour,
+           use_aux=(opt.use_normal or opt.use_img))
 net.apply(kaiming_init)
 weights_normal_init(net.output_layer, 0.001)
 
@@ -85,7 +90,7 @@ gamma = torch.from_numpy(gamma).float().cuda()
 
 
 # =============DEFINE stuff for logs ======================= #
-result_path = os.path.join(os.getcwd(), opt.save_dir, 'session_ibimis_{}'.format(opt.session))
+result_path = os.path.join(os.getcwd(), opt.save_dir)
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 logname = os.path.join(result_path, 'train_log.txt')
@@ -102,11 +107,18 @@ def train(data_loader, net, optimizer):
     end = time.time()
     for i, data in enumerate(data_loader):
         # load data and label
-        depth_gt, depth_coarse, occlusion, normal = data
-        depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+        depth_gt, depth_coarse, occlusion, normal, img = data
+        depth_gt, depth_coarse, occlusion, normal, img = \
+            depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), img.cuda()
 
         # forward pass
-        depth_pred = net(depth_coarse, occlusion, normal)
+        if opt.use_normal:
+            aux = normal
+        elif opt.use_img:
+            aux = img
+        else:
+            aux = None
+        depth_pred = net(depth_coarse, occlusion, aux)
 
         # compute losses and update the meters
         if opt.mask:
@@ -116,9 +128,15 @@ def train(data_loader, net, optimizer):
 
         loss_depth_gt = berhu_loss(depth_pred, depth_gt)
         loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-
         loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
-        loss = opt.alpha_depth * loss_depth_gt + opt.alpha_grad * loss_depth_grad + opt.alpha_occ * loss_depth_occ
+
+        loss_change_depth = berhu_loss(depth_pred, depth_coarse)
+        loss_change_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
+
+        loss = opt.alpha_depth * loss_depth_gt + \
+               opt.alpha_grad * loss_depth_grad + \
+               opt.alpha_occ * loss_depth_occ + \
+               opt.alpha_change * (opt.alpha_depth * loss_change_depth + opt.alpha_grad * loss_change_grad)
 
         optimizer.zero_grad()
         loss.backward()
@@ -160,11 +178,18 @@ def val(data_loader, net):
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge, normal = data
-            depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+            depth_gt, depth_coarse, occlusion, edge, normal, img = data
+            depth_gt, depth_coarse, occlusion, normal, img = \
+                depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), img.cuda()
 
             # forward pass
-            depth_pred = net(depth_coarse, occlusion, normal)
+            if opt.use_normal:
+                aux = normal
+            elif opt.use_img:
+                aux = img
+            else:
+                aux = None
+            depth_pred = net(depth_coarse, occlusion, aux)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()

@@ -31,7 +31,7 @@ parser.add_argument('--use_occ', action='store_true', help='whether to use occlu
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
 
-parser.add_argument('--th', type=float, default=0.5)
+parser.add_argument('--th', type=float, default=0.7)
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
 # pth settings

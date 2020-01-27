@@ -21,11 +21,13 @@ from lib.utils.evaluate_ibims_error_metrics import compute_global_errors, \
 parser = argparse.ArgumentParser()
 
 # network training procedure settings
-parser.add_argument('--use_normal', action='store_true', help='whether to use rgb image as network input')
+parser.add_argument('--use_normal', action='store_true', help='whether to use normal map as network input')
+parser.add_argument('--use_img', action='store_true', help='whether to use rgb image as network input')
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
-parser.add_argument('--th', type=float, default=None)
+parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
 
+parser.add_argument('--th', type=float, default=0.5)
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
 
 # pth settings
@@ -46,11 +48,16 @@ print(opt)
 # =================CREATE DATASET=========================== #
 dataset_val = Ibims(opt.val_dir, opt.val_method, th=opt.th, label_dir=opt.val_label_dir, label_ext=opt.val_label_ext)
 val_loader = DataLoader(dataset_val, batch_size=1, shuffle=False)
+
+with open('/space_sdd/ibims/imagelist.txt') as f:
+    image_names = f.readlines()
+image_names = [x.strip() for x in image_names]
 # ========================================================== #
 
 
 # ================CREATE NETWORK AND OPTIMIZER============== #
-net = UNet(use_occ=opt.use_occ, use_normal=opt.use_normal, no_contour=opt.no_contour)
+net = UNet(use_occ=opt.use_occ, no_contour=opt.no_contour, only_contour=opt.only_contour,
+           use_aux=(opt.use_normal or opt.use_img))
 optimizer = optim.Adam(net.parameters(), lr=opt.lr)
 
 load_checkpoint(net, optimizer, opt.checkpoint)
@@ -82,11 +89,18 @@ def test(data_loader, net, result_dir):
     with torch.no_grad():
         for i, data in enumerate(tqdm(data_loader)):
             # load data and label
-            depth_gt, depth_coarse, occlusion, edge, normal = data
-            depth_gt, depth_coarse, occlusion, normal = depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda()
+            depth_gt, depth_coarse, occlusion, edge, normal, img = data
+            depth_gt, depth_coarse, occlusion, normal, img = \
+                depth_gt.cuda(), depth_coarse.cuda(), occlusion.cuda(), normal.cuda(), img.cuda()
 
             # forward pass
-            depth_pred = net(depth_coarse, occlusion, normal).clamp(1e-9)
+            if opt.use_normal:
+                aux = normal
+            elif opt.use_img:
+                aux = img
+            else:
+                aux = None
+            depth_pred = net(depth_coarse, occlusion, aux).clamp(1e-9)
 
             # mask out invalid depth values
             valid_mask = (depth_gt != 0).float()
@@ -100,12 +114,18 @@ def test(data_loader, net, result_dir):
             init = init_valid.squeeze().cpu().numpy()
             edge = edge.numpy()
 
-            gt_name = os.path.join(result_dir, '{:04}_gt.png'.format(i))
-            pred_name = os.path.join(result_dir, '{:04}_refine.png'.format(i))
-            init_name = os.path.join(result_dir, '{:04}_init.png'.format(i))
-            plt.imsave(gt_name, gt)
-            plt.imsave(pred_name, pred)
-            plt.imsave(init_name, init)
+            # save npy files
+            np.save(os.path.join(result_dir, '{}_init.npy'.format(image_names[i])), init)
+            np.save(os.path.join(result_dir, '{}_refine.npy'.format(image_names[i])), pred)
+            np.save(os.path.join(result_dir, '{}_gt.npy'.format(image_names[i])), gt)
+
+            gt_name = os.path.join(result_dir, '{}_gt.png'.format(image_names[i]))
+            pred_name = os.path.join(result_dir, '{}_refine.png'.format(image_names[i]))
+            init_name = os.path.join(result_dir, '{}_init.png'.format(image_names[i]))
+            max_value = max(gt.max(), pred.max(), init.max())
+            plt.imsave(gt_name, gt, vmin=0, vmax=max_value)
+            plt.imsave(pred_name, pred, vmin=0, vmax=max_value)
+            plt.imsave(init_name, init, vmin=0, vmax=max_value)
 
             gt_vec = gt.flatten()
             pred_vec = pred.flatten()

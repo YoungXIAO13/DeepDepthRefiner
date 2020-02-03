@@ -29,7 +29,7 @@ parser.add_argument('--mask', action='store_true', help='mask contour for gradie
 parser.add_argument('--th', type=float, default=None)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
-parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
+#parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_change', type=float, default=0., help='weight balance')
 
@@ -118,7 +118,8 @@ def train(data_loader, net, optimizer):
             aux = img
         else:
             aux = None
-        depth_pred = net(depth_coarse, occlusion, aux)
+        #depth_pred = net(depth_coarse, occlusion, aux)
+        depth_refined = net(depth_coarse, occlusion, aux)
 
         # compute losses and update the meters
         if opt.mask:
@@ -126,17 +127,18 @@ def train(data_loader, net, optimizer):
         else:
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
-        loss_depth_gt = berhu_loss(depth_pred, depth_gt)
-        loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
+        # ground truth depth loss
+        loss_depth_gt = berhu_loss(depth_refined, depth_gt) + spatial_gradient_loss(depth_refined, depth_gt, mask)
 
-        loss_change_depth = berhu_loss(depth_pred, depth_coarse)
-        loss_change_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
+        # occlusion loss
+        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, 15. / 1000, 2 ** 0.5)
+
+        # regularization loss
+        loss_change = berhu_loss(depth_refined, depth_coarse) + spatial_gradient_loss(depth_refined, depth_coarse, mask)
 
         loss = opt.alpha_depth * loss_depth_gt + \
-               opt.alpha_grad * loss_depth_grad + \
                opt.alpha_occ * loss_depth_occ + \
-               opt.alpha_change * (opt.alpha_depth * loss_change_depth + opt.alpha_grad * loss_change_grad)
+               opt.alpha_change * loss_change
 
         optimizer.zero_grad()
         loss.backward()
@@ -147,11 +149,12 @@ def train(data_loader, net, optimizer):
         end = time.time()
 
         if i % opt.print_freq == 0:
-            print("\tEpoch {} --- Iter [{}/{}] Train loss: {:.3f} + {:.3f} + {:.3f} || Batch time: {:.3f}".format(
-                  epoch, i + 1, len(data_loader), 
+            print("\tEpoch {} --- Iter [{}/{}] Gt_depth loss: {:.3f}  Occ loss: {:.3f}  Change loss: {:.3f} || Batch time: {:.3f}".format(
+                  epoch, i + 1, len(data_loader),
                   opt.alpha_depth * loss_depth_gt.item(),
-                  opt.alpha_grad * loss_depth_grad.item(),
-                  opt.alpha_occ * loss_depth_occ.item(), batch_time))
+                  opt.alpha_occ * loss_depth_occ.item(),
+                  opt.alpha_change * loss_change.item(),
+                  batch_time))
 # ========================================================== #
 
 

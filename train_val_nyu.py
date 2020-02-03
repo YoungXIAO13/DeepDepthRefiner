@@ -27,12 +27,12 @@ parser.add_argument('--use_img', action='store_true', help='whether to use rgb i
 parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
 parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
+parser.add_argument('--use_log', action='store_true', help='whether to use occlusion as network input')
 
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
-parser.add_argument('--th', type=float, default=0.5)
+parser.add_argument('--th', type=float, default=0.7)
 
 parser.add_argument('--alpha_depth', type=float, default=1., help='weight balance')
-parser.add_argument('--alpha_grad', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_occ', type=float, default=1., help='weight balance')
 parser.add_argument('--alpha_change', type=float, default=0., help='weight balance')
 
@@ -143,7 +143,11 @@ def train(data_loader, net, optimizer):
             aux = img
         else:
             aux = None
-        depth_pred = net(depth_coarse, occlusion, aux)
+
+        if opt.use_log:
+            depth_refined = depth_coarse * net(depth_coarse.log(), occlusion, aux).exp()
+        else:
+            depth_refined = net(depth_coarse, occlusion, aux)
 
         # compute losses and update the meters
         if opt.mask:
@@ -151,17 +155,18 @@ def train(data_loader, net, optimizer):
         else:
             mask = (occlusion[:, 0, :, :] >= 0).float().unsqueeze(1)
 
-        loss_depth_gt = berhu_loss(depth_pred, depth_gt)
-        loss_depth_grad = spatial_gradient_loss(depth_pred, depth_gt, mask)
-        loss_depth_occ = occlusion_aware_loss(depth_pred, occlusion, normal, gamma, 15. / 1000, 1)
+        # ground truth depth loss
+        loss_depth_gt = berhu_loss(depth_refined, depth_gt) + spatial_gradient_loss(depth_refined, depth_gt, mask)
 
-        loss_change_depth = berhu_loss(depth_pred, depth_coarse)
-        loss_change_grad = spatial_gradient_loss(depth_pred, depth_coarse, mask)
+        # occlusion loss
+        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, 15. / 1000, 2 ** 0.5)
+
+        # regularization loss
+        loss_change = berhu_loss(depth_refined, depth_coarse) + spatial_gradient_loss(depth_refined, depth_coarse, mask)
 
         loss = opt.alpha_depth * loss_depth_gt + \
-               opt.alpha_grad * loss_depth_grad + \
                opt.alpha_occ * loss_depth_occ + \
-               opt.alpha_change * (opt.alpha_depth * loss_change_depth + opt.alpha_grad * loss_change_grad)
+               opt.alpha_change * loss_change
 
         # optimization step
         optimizer.zero_grad()
@@ -173,11 +178,12 @@ def train(data_loader, net, optimizer):
         end = time.time()
 
         if i % opt.print_freq == 0:
-            print("\tEpoch {} --- Iter [{}/{}] Train loss: {:.3f} + {:.3f} + {:.3f} || Batch time: {:.3f}".format(
+            print("\tEpoch {} --- Iter [{}/{}] Gt_depth loss: {:.3f}  Occ loss: {:.3f}  Change loss: {:.3f} || Batch time: {:.3f}".format(
                   epoch, i + 1, len(data_loader),
                   opt.alpha_depth * loss_depth_gt.item(),
-                  opt.alpha_grad * loss_depth_grad.item(),
-                  opt.alpha_occ * loss_depth_occ.item(), batch_time))
+                  opt.alpha_occ * loss_depth_occ.item(),
+                  opt.alpha_change * loss_change.item(),
+                  batch_time))
 # ========================================================== #
 
 
@@ -223,8 +229,13 @@ def val(net):
                 aux = None
             if aux is not None:
                 aux = padding_array(aux).unsqueeze(0).cuda()
-            pred = net(depth_coarse, occlusion, aux)
-            pred = pred.clamp(1e-9)
+
+            if opt.use_log:
+                depth_refined = depth_coarse * net(depth_coarse.log(), occlusion, aux).exp()
+            else:
+                depth_refined = net(depth_coarse, occlusion, aux)
+
+            pred = depth_refined.clamp(1e-9)
 
             # get numpy array from torch tensor
             gt = gt_depths[i, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]

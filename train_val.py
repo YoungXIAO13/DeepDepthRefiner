@@ -131,7 +131,7 @@ def train(data_loader, net, optimizer):
         loss_depth_gt = berhu_loss(depth_refined, depth_gt) + spatial_gradient_loss(depth_refined, depth_gt, mask)
 
         # occlusion loss
-        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, 15. / 1000, 2 ** 0.5)
+        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, 15. / 1000, 1)
 
         # regularization loss
         loss_change = berhu_loss(depth_refined, depth_coarse) + spatial_gradient_loss(depth_refined, depth_coarse, mask)

@@ -188,7 +188,7 @@ def neighbor_depth_variation_tangent(depth, normal, diagonal=np.sqrt(2)):
     return torch.cat((var1, var2, var3, var4, var6, var7, var8, var9), 1)
 
 
-def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=np.sqrt(2)):
+def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=np.sqrt(2), var=0):
     """
     Compute a distance between depth maps using the occlusion orientation
     :param depth_pred: (B, 1, H, W)
@@ -215,6 +215,11 @@ def occlusion_aware_loss(depth_pred, occlusion, normal, gamma, th=1., diagonal=n
 
     # compute the loss for different cases
     th_tensor = torch.as_tensor(th).repeat(depth_var_geo.shape).type_as(depth_var_geo)
+
+    if var == 1:  ## dd
+        depth_var_geo = depth_var_point
+    elif var == 2:  ## DD
+        depth_var_point = depth_var_geo
 
     fn_fg_mask = ((orientation == 1) * (depth_var_point > -th)).float()
     fn_bg_mask = ((orientation == -1) * (depth_var_point < th)).float()

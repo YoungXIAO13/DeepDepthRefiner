@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 import os
 from tqdm import tqdm
+from PIL import Image
 
 import matplotlib
 matplotlib.use('agg')  # use matplotlib without GUI support
@@ -126,6 +127,14 @@ def test(data_loader, net, result_dir):
             plt.imsave(gt_name, gt, vmin=0, vmax=max_value)
             plt.imsave(pred_name, pred, vmin=0, vmax=max_value)
             plt.imsave(init_name, init, vmin=0, vmax=max_value)
+
+            gt_mm = Image.fromarray((gt * 1000).astype('int32'))
+            gt_mm.save(os.path.join(result_dir, '{}_gt_mm.png'.format(image_names[i])))
+            refine_mm = Image.fromarray((pred * 1000).astype('int32'))
+            refine_mm.save(os.path.join(result_dir, '{}_refine_mm.png'.format(image_names[i])))
+            init_mm = Image.fromarray((init * 1000).astype('int32'))
+            init_mm.save(os.path.join(result_dir, '{}_init_mm.png'.format(image_names[i])))
+
 
             gt_vec = gt.flatten()
             pred_vec = pred.flatten()

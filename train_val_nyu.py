@@ -29,6 +29,9 @@ parser.add_argument('--no_contour', action='store_true', help='whether to remove
 parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
 parser.add_argument('--use_log', action='store_true', help='whether to use occlusion as network input')
 
+parser.add_argument('--var', type=int, default=0, help='ablation in gt oob')
+parser.add_argument('--delta', type=float, default=15, help='depth discontinuity threshold in loss function')
+
 parser.add_argument('--mask', action='store_true', help='mask contour for gradient loss')
 parser.add_argument('--th', type=float, default=0.7)
 
@@ -65,7 +68,7 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method)
+dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method, label_name='_raycastingV3_25mm_25mm')
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 
 # define crop size for NYUv2
@@ -159,7 +162,7 @@ def train(data_loader, net, optimizer):
         loss_depth_gt = berhu_loss(depth_refined, depth_gt) + spatial_gradient_loss(depth_refined, depth_gt, mask)
 
         # occlusion loss
-        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, 15. / 1000, 1)
+        loss_depth_occ = occlusion_aware_loss(depth_refined, occlusion, normal, gamma, opt.delta / 1000, 1, opt.var)
 
         # regularization loss
         loss_change = berhu_loss(depth_refined, depth_coarse) + spatial_gradient_loss(depth_refined, depth_coarse, mask)

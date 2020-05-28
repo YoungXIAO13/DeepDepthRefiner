@@ -79,7 +79,6 @@ def padding_array(label_crop, h=480, w=640):
 
 
 # functions to read depth predictions on NYUv2
-
 eigen_crop = [0, 480, 0, 640]
 
 

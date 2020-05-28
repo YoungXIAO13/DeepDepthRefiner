@@ -68,7 +68,7 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method, label_name='_raycastingV3_25mm_25mm')
+dataset_train = InteriorNet(opt.train_dir, method_name=opt.train_method, label_name='_raycastingV2')
 train_loader = DataLoader(dataset_train, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, drop_last=True)
 
 # define crop size for NYUv2
@@ -240,7 +240,7 @@ def val(net):
 
             pred = depth_refined.clamp(1e-9)
 
-            # get numpy array from torch tensor
+            # get numpy array from torch tensor and crop
             gt = gt_depths[i, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
             edge = gt_boundaries[i, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
             pred = pred.squeeze().cpu().numpy()[eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]

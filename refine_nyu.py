@@ -27,9 +27,9 @@ parser.add_argument('checkpoint', type=str, default=None, help='optional reload 
 
 parser.add_argument('--use_normal', action='store_true', help='whether to use normal map as network input')
 parser.add_argument('--use_img', action='store_true', help='whether to use rgb image as network input')
-parser.add_argument('--use_occ', action='store_true', help='whether to use occlusion as network input')
-parser.add_argument('--no_contour', action='store_true', help='whether to remove the first channel of occlusion')
 parser.add_argument('--only_contour', action='store_true', help='whether to keep only the first channel of occlusion')
+parser.add_argument('--use_occ', default=True, type=bool, help='whether to use occlusion as network input')
+parser.add_argument('--no_contour', default=True, type=bool, help='whether to remove the first channel of occlusion')
 
 parser.add_argument('--th', type=float, default=0.7)
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate of optimizer')
@@ -45,7 +45,7 @@ print(opt)
 
 
 # =================CREATE DATASET=========================== #
-eigen_crop = [0, 480, 0, 640]
+eigen_crop = [21, 461, 25, 617]
 
 
 def read_jiao():
@@ -54,6 +54,7 @@ def read_jiao():
     for i in range(654):
         f = loadmat(jiao_pred_path + str(i+1) + '.mat')
         f = f['pred']
+        f = f[eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]]
         ours.append(f)
     ours = np.array(ours)
     return ours
@@ -80,7 +81,7 @@ def read_eigen():
     ours = ours.transpose((2, 0, 1))
     out = []
     for line in ours:
-        line = cv2.resize(line, (640, 480))
+        line = cv2.resize(line, (592, 440))
         out.append(line)
     out = np.array(out)
     return out
@@ -152,24 +153,26 @@ img_list = sorted([name for name in os.listdir(opt.data_dir) if name.endswith("-
 for method in tqdm(['jiao', 'laina', 'sharpnet', 'eigen', 'dorn', 'bts', 'vnl']):
     # read in depths
     func = eval('read_{}'.format(method))
-    depths = func()
+    depths_ori = func()
+    # padding to 480x640
+    depths = np.zeros((depths_ori.shape[0], 480, 640))
+    depths[:, eigen_crop[0]:eigen_crop[1], eigen_crop[2]:eigen_crop[3]] = depths_ori
     depths = torch.from_numpy(np.ascontiguousarray(depths)).float().unsqueeze(1)
     assert len(occ_list) == depths.shape[0], 'depth map and occlusion map does not match !'
 
     with torch.no_grad():
         for i in tqdm(range(len(occ_list)), desc='refining depth prediction from {}'.format(method)):
             depth_coarse = depths[i].unsqueeze(0).cuda()
-
+            
             occlusion = np.load(os.path.join(opt.occ_dir, occ_list[i]))
 
             # remove predictions with small score
             mask = occlusion[:, :, 0] <= opt.th
             occlusion[mask, 1:] = 0
 
-            occlusion = padding_array(occlusion)
-            occlusion = occlusion.unsqueeze(0).cuda()
+            occlusion = padding_array(occlusion).unsqueeze(0).cuda()
+            #occlusion = torch.from_numpy(np.ascontiguousarray(occlusion)).float().permute(2, 0, 1).unsqueeze(0).cuda()
 
-            # forward pass
             if opt.use_normal:
                 aux = cv2.imread(os.path.join(opt.data_dir, normal_list[i]), -1) / (2 ** 16 - 1) * 2 - 1
             elif opt.use_img:
@@ -178,6 +181,8 @@ for method in tqdm(['jiao', 'laina', 'sharpnet', 'eigen', 'dorn', 'bts', 'vnl'])
                 aux = None
             if aux is not None:
                 aux = padding_array(aux).unsqueeze(0).cuda()
+            
+            # forward pass
             pred = net(depth_coarse, occlusion, aux)
 
             depth_refine = pred.clamp(1e-9).squeeze().cpu().numpy()
@@ -185,7 +190,7 @@ for method in tqdm(['jiao', 'laina', 'sharpnet', 'eigen', 'dorn', 'bts', 'vnl'])
 
             img_name = occ_list[i].split('-')[0]
             refine_name = os.path.join(opt.result_dir, method, 'depth_refine', '{}.png'.format(img_name))
-            init_name = os.path.join(opt.result_dir, method, 'depth_init', '{}.png'.format(img_name))
+            #init_name = os.path.join(opt.result_dir, method, 'depth_init', '{}.png'.format(img_name))
             save_name = os.path.join(opt.result_dir, method, 'depth_npy', '{}.npy'.format(img_name))
 
             if not os.path.isdir(os.path.dirname(refine_name)):
